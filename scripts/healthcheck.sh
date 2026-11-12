@@ -26,7 +26,7 @@ echo -e "${BOLD}Database Health & Status Verification${NC}"
 echo -e "${BLUE}================================================================${NC}"
 
 # 1. PostgreSQL check
-PG_NAME="${POSTGRES_CONTAINER_NAME:-database-hub-postgres}"
+PG_NAME="${POSTGRES_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-postgres}"
 if docker ps --format '{{.Names}}' | grep -q "^${PG_NAME}$"; then
     echo -n "Checking PostgreSQL (${PG_NAME})... "
     if docker exec "$PG_NAME" pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-app_db}" > /dev/null 2>&1; then
@@ -37,7 +37,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${PG_NAME}$"; then
 fi
 
 # 2. MySQL check
-MYSQL_NAME="${MYSQL_CONTAINER_NAME:-database-hub-mysql}"
+MYSQL_NAME="${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}"
 if docker ps --format '{{.Names}}' | grep -q "^${MYSQL_NAME}$"; then
     echo -n "Checking MySQL (${MYSQL_NAME})... "
     if docker exec "$MYSQL_NAME" mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD:-mysql_root_secure_pass}" > /dev/null 2>&1; then
@@ -48,7 +48,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${MYSQL_NAME}$"; then
 fi
 
 # 3. MongoDB check
-MONGO_NAME="${MONGO_CONTAINER_NAME:-database-hub-mongodb}"
+MONGO_NAME="${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}"
 if docker ps --format '{{.Names}}' | grep -q "^${MONGO_NAME}$"; then
     echo -n "Checking MongoDB (${MONGO_NAME})... "
     if docker exec "$MONGO_NAME" mongosh --quiet --eval "db.adminCommand({ping:1})" > /dev/null 2>&1; then
@@ -59,7 +59,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${MONGO_NAME}$"; then
 fi
 
 # 4. Redis check
-REDIS_NAME="${REDIS_CONTAINER_NAME:-database-hub-redis}"
+REDIS_NAME="${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}"
 if docker ps --format '{{.Names}}' | grep -q "^${REDIS_NAME}$"; then
     echo -n "Checking Redis (${REDIS_NAME})... "
     if [ -n "${REDIS_PASSWORD:-}" ]; then

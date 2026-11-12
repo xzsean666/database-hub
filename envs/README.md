@@ -30,103 +30,81 @@ envs/
 
 ---
 
+## 💡 多数据库 / 多实例部署原理（`INSTANCE_ID` 与端口规划）
+
+当你在同一台服务器上部署**多个数据库实例**（例如业务 A 的 PostgreSQL 与业务 B 的 PostgreSQL，或多个不同业务线）时：
+
+### 1. 为什么数据库只暴露一个端口？
+每个数据库引擎标准协议下都只需要一个主网络端口：
+- **PostgreSQL**：`5432`
+- **MySQL**：`3306`
+- **MongoDB**：`27017`
+- **Redis**：`6379`
+
+在 Docker 容器内部，监听端口永远是标准默认值；而宿主机映射端口（Host Port）可以在各自的 `.env` 中灵活指定。
+
+### 2. 多实例隔离机制：
+通过在 `.env` 中为每个实例指定独立的 **`INSTANCE_ID`** 与宿主机端口：
+- **容器命名隔离**：自动命名为 `${INSTANCE_ID}-postgres`，避免容器名冲突。
+- **Docker Compose 隔离**：使用 `-p ${INSTANCE_ID}` 独立栈隔离。
+- **端口不冲突**：实例 A 监听 `5432`，实例 B 监听 `5433`。
+- **自动备份定时器隔离**：Systemd 自动生成 `dbhub-backup-${INSTANCE_ID}.timer`，多套定时器独立自启、互不覆盖。
+- **备份归档与轮转隔离**：备份文件包含 `${INSTANCE_ID}` 标记，自动按保留上限（Retention）清理旧备份时，绝不误删其他实例的备份！
+
+---
+
 ## 🚀 部署实战命令示例
 
 在使用之前，只需复制对应的 `.example` 为您自己的 `.env` 文件，并填写强密码：
 
-### 示例 1: 远程部署 PostgreSQL (生产高配置)
+### 示例 1: 部署第 1 套数据库（例如商城的 PostgreSQL，端口 5432）
 ```bash
-# 1. 复制模板并配置密码
-cp envs/postgres/prod-high-perf.env.example envs/postgres/prod.env
-# 编辑 envs/postgres/prod.env 修改密码
+# 复制模板并配置
+cp envs/postgres/prod-high-perf.env.example envs/postgres/mall.env
+# 在 mall.env 中设置:
+# INSTANCE_ID=mall-db
+# POSTGRES_PORT=5432
 
-# 2. 远程部署（并应用 Linux 主机内核优化）
-./deploy.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
-  --env envs/postgres/prod.env \
-  --db postgres \
-  --tune-host
+# 部署并开启自启动备份
+./dbhub.sh --env envs/postgres/mall.env --db postgres --auto-backup
 ```
 
----
-
-### 示例 2: 远程部署 Redis 高性能缓存
+### 示例 2: 在同一台机器部署第 2 套数据库（例如计费系统的 PostgreSQL，端口 5433）
 ```bash
-# 1. 复制模板
+# 复制模板并配置
+cp envs/postgres/prod-high-perf.env.example envs/postgres/billing.env
+# 在 billing.env 中设置:
+# INSTANCE_ID=billing-db
+# POSTGRES_PORT=5433
+
+# 部署并开启自启动备份
+./dbhub.sh --env envs/postgres/billing.env --db postgres --auto-backup
+```
+
+### 示例 3: 远程部署 Redis 缓存
+```bash
 cp envs/redis/cache-lru.env.example envs/redis/cache.env
 
-# 2. 部署到远程服务器
-./deploy.sh \
+./dbhub.sh \
   --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
   --env envs/redis/cache.env \
   --db redis
 ```
 
----
-
-### 示例 3: 远程部署常见 Web 组合（PostgreSQL + Redis）
+### 示例 4: 远程部署常见 Web 组合（PostgreSQL + Redis）
 ```bash
-# 复制整合版环境文件
 cp envs/all/prod.env.example envs/all/my-prod.env
 
-# 指定部署 postgres 和 redis 两种数据库
-./deploy.sh \
+./dbhub.sh \
   --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
   --env envs/all/my-prod.env \
   --db postgres,redis
 ```
 
----
-
-### 示例 4: 远程部署 MySQL 8.x
+### 示例 5: 远程服务健康检查与备份状态监控
 ```bash
-cp envs/mysql/prod-high-perf.env.example envs/mysql/prod.env
-
-./deploy.sh \
+./dbhub.sh \
   --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
-  --env envs/mysql/prod.env \
-  --db mysql
-```
-
----
-
-### 示例 5: 远程部署 MongoDB 7.0
-```bash
-cp envs/mongodb/prod-high-perf.env.example envs/mongodb/prod.env
-
-./deploy.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
-  --env envs/mongodb/prod.env \
-  --db mongodb
-```
-
----
-
-### 示例 6: 本地开发环境部署全部 4 种数据库
-```bash
-# 复制开发模板
-cp envs/all/dev.env.example .env
-
-# 本地快速拉起
-./deploy.sh --local --env .env --db all
-```
-
----
-
-### 示例 7: 远程服务健康检查与状态监控
-```bash
-./deploy.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
-  --env envs/postgres/prod.env \
-  --action status
-```
-
----
-
-### 示例 8: 实时查看远程容器运行日志
-```bash
-./deploy.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
-  --env envs/postgres/prod.env \
-  --action logs
+  --env envs/postgres/mall.env \
+  --action backup-status
 ```

@@ -18,6 +18,16 @@ data/
 */data/
 test_data/
 
+# Backup archives & storage
+backups/
+*/backups/
+*.zst
+*.xz
+*.gz
+*.sql
+*.archive
+*.sha256
+
 # Logs
 *.log
 logs/
