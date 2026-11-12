@@ -40,7 +40,8 @@ services:
       - "${BIND_IP:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - "${POSTGRES_DATA_DIR:-${DATA_DIR:-./data}/postgres}:/var/lib/postgresql/data"
-      - "./configs/postgres/conf.d/01-tuning.conf:/etc/postgresql/postgresql.conf:ro"
+      - "./configs/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro"
+      - "./configs/postgres/conf.d:/etc/postgresql/conf.d:ro"
       - "./configs/postgres/init:/docker-entrypoint-initdb.d:ro"
     ulimits:
       nofile:
@@ -52,6 +53,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - database-hub-net
 
@@ -71,6 +74,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mysql_user_secure_pass}
       TZ: ${TZ:-UTC}
     command:
+      - "--server-id=${MYSQL_SERVER_ID:-1}"
       - "--innodb-buffer-pool-size=${MYSQL_BUFFER_POOL_SIZE:-1G}"
       - "--max-connections=${MYSQL_MAX_CONNECTIONS:-300}"
       - "--skip-name-resolve"
@@ -92,6 +96,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - database-hub-net
 
@@ -110,16 +116,24 @@ services:
       MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-app_db}
       TZ: ${TZ:-UTC}
     command:
-      - "mongod"
-      - "--config"
-      - "/etc/mongod.conf"
-      - "--wiredTigerCacheSizeGB"
-      - "${MONGO_CACHE_SIZE_GB:-2}"
+      - "sh"
+      - "-c"
+      - >
+        EXTRA_FLAGS="";
+        if [ -n "$$MONGO_REPL_SET_NAME" ]; then
+          EXTRA_FLAGS="--replSet $$MONGO_REPL_SET_NAME";
+        fi;
+        if [ -f "/etc/mongodb/keys/mongo-keyfile" ]; then
+          chmod 400 /etc/mongodb/keys/mongo-keyfile 2>/dev/null || true;
+          EXTRA_FLAGS="$$EXTRA_FLAGS --keyFile /etc/mongodb/keys/mongo-keyfile";
+        fi;
+        exec mongod --config /etc/mongod.conf --wiredTigerCacheSizeGB "$${MONGO_CACHE_SIZE_GB:-2}" $$EXTRA_FLAGS
     ports:
       - "${BIND_IP:-0.0.0.0}:${MONGO_PORT:-27017}:27017"
     volumes:
       - "${MONGO_DATA_DIR:-${DATA_DIR:-./data}/mongodb}:/data/db"
       - "./configs/mongodb/mongod.conf:/etc/mongod.conf:ro"
+      - "./configs/mongodb/keys:/etc/mongodb/keys:ro"
       - "./configs/mongodb/init:/docker-entrypoint-initdb.d:ro"
     ulimits:
       nofile:
@@ -134,6 +148,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - database-hub-net
 
@@ -153,10 +169,17 @@ services:
       - "sh"
       - "-c"
       - >
+        EXTRA_FLAGS="";
+        if [ "$${REDIS_ROLE:-master}" = "replica" ] && [ -n "$$REDIS_MASTER_HOST" ]; then
+          EXTRA_FLAGS="--replicaof $$REDIS_MASTER_HOST $${REDIS_MASTER_PORT:-6379} --replica-read-only yes";
+          if [ -n "$${REDIS_MASTER_PASSWORD:-$$REDIS_PASSWORD}" ]; then
+            EXTRA_FLAGS="$$EXTRA_FLAGS --masterauth $${REDIS_MASTER_PASSWORD:-$$REDIS_PASSWORD}";
+          fi;
+        fi;
         if [ -n "$$REDIS_PASSWORD" ]; then
-          exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$REDIS_PASSWORD" --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}";
+          exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$REDIS_PASSWORD" --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}" $$EXTRA_FLAGS;
         else
-          exec redis-server /usr/local/etc/redis/redis.conf --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}";
+          exec redis-server /usr/local/etc/redis/redis.conf --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}" $$EXTRA_FLAGS;
         fi
     ports:
       - "${BIND_IP:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
@@ -175,6 +198,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - database-hub-net
 

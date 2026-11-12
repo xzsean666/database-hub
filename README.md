@@ -202,6 +202,49 @@ The generic restore tool automatically connects to the local or remote host, ins
 
 ---
 
+## 🔗 Master-Replica High Availability & Replication
+
+Database Hub supports in-place conversion of running databases into **Masters**, and automated bootstrapping of **Replicas** across remote servers via SSH, strictly scoped by `.env` to support multiple database stacks per host.
+
+### 1. Upgrade Running Database to Master (Zero Data Loss)
+
+Seamlessly promote an existing standalone database stack to Master:
+
+```bash
+# Locally
+./dbhub.sh --action make-master --env .env --db all
+
+# Remotely over SSH for a specific environment
+./dbhub.sh --ssh "root@192.168.1.101" --action make-master --env envs/user-db.env --db postgres
+```
+
+### 2. Deploy a Replica Tracking a Master (Cross-SSH Support)
+
+Deploy a replica onto another server, inheriting configuration from the Master `.env`, pulling an initial throttled base backup (`--max-rate 30M`), and streaming real-time incremental updates:
+
+```bash
+# Deploy a replica on 192.168.1.102 tracking Master on 192.168.1.101
+./dbhub.sh --replica \
+  --ssh "root@192.168.1.102" \
+  --master-ssh "root@192.168.1.101" \
+  --master-env "envs/user-db.env" \
+  --db postgres \
+  --max-rate "30M"
+```
+
+### 3. Inspect Cluster Replication Status & Sync Lag
+
+```bash
+# Inspect replication health and lag
+./dbhub.sh --action repl-status --env envs/user-db.env
+```
+
+### 4. Interactive Replication Wizard
+
+Simply run `./dbhub.sh` to launch the interactive menu, select `10) make-master` or `11) deploy-replica`, and the wizard will automatically scan Master environments, calculate non-colliding ports, derive replica configs, and bootstrap replication.
+
+---
+
 ## ⚙️ CLI Reference (`dbhub.sh`)
 
 | Option | Description |
@@ -210,7 +253,12 @@ The generic restore tool automatically connects to the local or remote host, ins
 | `-l, --local` | Run on current local host (default). |
 | `-e, --env <path>` | Path to `.env` configuration file (default: `.env`). |
 | `-d, --db <list>` | Databases to deploy: `postgres`, `mysql`, `mongodb`, `redis`, or `all` (comma-separated, default: `all`). |
-| `-a, --action <act>` | Action: `up` (default), `down`, `restart`, `status`, `logs`, `backup`, `backup-status`, `restore`, `tune-host`. |
+| `-a, --action <act>` | Action: `up` (default), `down`, `restart`, `status`, `logs`, `backup`, `backup-status`, `restore`, `make-master`, `deploy-replica`, `repl-status`, `scan`, `tune-host`. |
+| `--make-master` | Shortcut to upgrade specified database instance to Master. |
+| `--replica` | Shortcut to deploy replica instance tracking a Master. |
+| `--master-ssh "<cmd>"` | SSH connection string to the Master server. |
+| `--master-env <path>` | Path to Master's `.env` configuration file on Master server. |
+| `--max-rate <rate>` | Bandwidth limit for initial full sync (default: `30M`, e.g. `10M`, `50M`). |
 | `--auto-backup` | Enable automated extreme-compression backup daemon. |
 | `--backup-schedule <c>` | Backup frequency: `daily` (default, 1 day 1 time at 02:00 AM), `12h`, `6h`, or custom cron. |
 | `--backup-retention <n>`| Maximum number of backups to keep per database (default: `7`). |

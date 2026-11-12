@@ -17,16 +17,28 @@ source "$PROJECT_ROOT/scripts/lib/common.sh"
 source "$PROJECT_ROOT/scripts/lib/scheduler.sh"
 # shellcheck disable=SC1091
 source "$PROJECT_ROOT/scripts/lib/summary.sh"
+# shellcheck disable=SC1091
+source "$PROJECT_ROOT/scripts/lib/cluster/network.sh"
+# shellcheck disable=SC1091
+source "$PROJECT_ROOT/scripts/lib/cluster/metadata.sh"
+# shellcheck disable=SC1091
+source "$PROJECT_ROOT/scripts/lib/cluster/env-manager.sh"
 
 # Default configuration
 TARGET="local"                  # local or remote
 SSH_CMD=""                     # Raw SSH command or connection string
 ENV_FILE=""                    # Path to .env file
 SELECTED_DBS="all"             # postgres, mysql, mongodb, redis, all
-ACTION="up"                    # up, down, restart, status, logs, backup, backup-status, restore, tune-host
+ACTION="up"                    # up, down, restart, status, logs, backup, backup-status, restore, tune-host, make-master, deploy-replica, repl-status, scan
 REMOTE_DIR="/opt/database-hub"
 TUNE_HOST=false
 AUTO_INSTALL_DOCKER=false
+
+# Replication configuration
+MASTER_ENV=""
+MASTER_SSH=""
+MAX_RATE="30M"
+ROLE=""
 
 # Auto-backup configuration
 ENABLE_AUTO_BACKUP=false
@@ -59,8 +71,17 @@ Options:
                                  backup        - Trigger immediate database backup
                                  backup-status - Check auto-backup daemon status, schedule & files
                                  restore       - Launch universal database restore wizard
+                                 make-master   - Upgrade database instance to Master
+                                 deploy-replica- Deploy Replica tracking a Master instance
+                                 repl-status   - Check cluster replication status & sync lag
+                                 scan          - Scan all database environments on host
                                  tune-host     - Apply Linux kernel performance tuning
   -r, --remote-dir <path>        Remote directory on server (default: /opt/database-hub)
+      --make-master, --upgrade-to-master  Shortcut to upgrade database stack to Master
+      --replica, --deploy-replica         Shortcut to deploy database stack as Replica
+      --master-ssh \"<cmd>\"       SSH connection command to Master server
+      --master-env <path>        Path to Master's .env file
+      --max-rate <rate>          Bandwidth limit for initial sync (default: 30M)
       --auto-backup              Enable automated extreme backup daemon
       --backup-schedule <cron>   Backup schedule / frequency:
                                  'daily' (default, 1 day 1 time at 02:00 AM),
@@ -124,6 +145,27 @@ parse_args() {
                 ;;
             -r|--remote-dir)
                 REMOTE_DIR="$2"
+                shift 2
+                ;;
+            --make-master|--upgrade-to-master)
+                ACTION="make-master"
+                shift
+                ;;
+            --replica|--deploy-replica)
+                ACTION="deploy-replica"
+                ROLE="replica"
+                shift
+                ;;
+            --master-ssh)
+                MASTER_SSH="$2"
+                shift 2
+                ;;
+            --master-env)
+                MASTER_ENV="$2"
+                shift 2
+                ;;
+            --max-rate)
+                MAX_RATE="$2"
                 shift 2
                 ;;
             --auto-backup)
@@ -218,7 +260,11 @@ run_interactive() {
     echo "  7) restart       - Restart containers"
     echo "  8) down          - Stop and remove containers"
     echo "  9) tune-host     - Apply Linux host kernel tuning"
-    read -rp "Enter choice [1-9] (default: 1): " action_choice
+    echo " 10) make-master   - Upgrade database instance to Master"
+    echo " 11) deploy-replica- Deploy new Replica from Master environment"
+    echo " 12) repl-status   - Check replication sync lag & cluster health"
+    echo " 13) scan          - Scan all database environments on host"
+    read -rp "Enter choice [1-13] (default: 1): " action_choice
     case "${action_choice:-1}" in
         1) ACTION="up" ;;
         2) ACTION="status" ;;
@@ -229,8 +275,101 @@ run_interactive() {
         7) ACTION="restart" ;;
         8) ACTION="down" ;;
         9) ACTION="tune-host" ;;
+        10) ACTION="make-master" ;;
+        11) ACTION="deploy-replica" ;;
+        12) ACTION="repl-status" ;;
+        13) ACTION="scan" ;;
         *) ACTION="up" ;;
     esac
+
+    # If action is deploy-replica, interactively guide Master discovery
+    if [ "$ACTION" = "deploy-replica" ]; then
+        echo ""
+        echo -e "${BOLD}Deploy Replica Configuration Wizard:${NC}"
+        read -rp "Enter Master SSH connection string (leave blank if Master is local): " master_ssh_input
+        MASTER_SSH="$master_ssh_input"
+
+        echo -e "\n${CYAN}Scanning available database environments on Master...${NC}"
+        local master_envs=()
+        if [ -n "$MASTER_SSH" ]; then
+            while IFS= read -r line; do
+                if [ -n "$line" ]; then master_envs+=("$line"); fi
+            done < <(scan_remote_env_files "$MASTER_SSH" "$REMOTE_DIR")
+        else
+            while IFS= read -r line; do
+                if [ -n "$line" ]; then master_envs+=("$line"); fi
+            done < <(scan_env_files "$PROJECT_ROOT")
+        fi
+
+        if [ ${#master_envs[@]} -gt 0 ]; then
+            echo -e "${BOLD}Select Master Environment to replicate:${NC}"
+            local idx=1
+            for e in "${master_envs[@]}"; do
+                IFS='|' read -r ep ei er ed <<< "$e"
+                echo "  $idx) $ep (Instance: $ei, DBs: $ed)"
+                ((idx++))
+            done
+            read -rp "Enter choice [1-${#master_envs[@]}] (default: 1): " env_pick
+            env_pick="${env_pick:-1}"
+            local selected_line="${master_envs[$((env_pick-1))]}"
+            IFS='|' read -r MASTER_ENV m_inst_id _ _ <<< "$selected_line"
+            log_info "Selected Master env: $MASTER_ENV [Instance: $m_inst_id]"
+        else
+            read -rp "Enter path to Master .env file (default: .env): " master_env_input
+            MASTER_ENV="${master_env_input:-.env}"
+        fi
+
+        echo ""
+        echo -e "${BOLD}Select Databases to Replicate:${NC}"
+        echo "  1) All databases"
+        echo "  2) PostgreSQL only"
+        echo "  3) MySQL only"
+        echo "  4) MongoDB only"
+        echo "  5) Redis only"
+        read -rp "Enter choice [1-5] (default: 1): " repl_db_choice
+        case "${repl_db_choice:-1}" in
+            1) SELECTED_DBS="all" ;;
+            2) SELECTED_DBS="postgres" ;;
+            3) SELECTED_DBS="mysql" ;;
+            4) SELECTED_DBS="mongodb" ;;
+            5) SELECTED_DBS="redis" ;;
+            *) SELECTED_DBS="all" ;;
+        esac
+
+        read -rp "Initial full sync bandwidth limit [default: 30M]: " rate_choice
+        MAX_RATE="${rate_choice:-30M}"
+
+        # Automatically generate replica env file if needed
+        local is_same="false"
+        if [ -z "$SSH_CMD" ] && [ -z "$MASTER_SSH" ]; then
+            is_same="true"
+        elif [ "$SSH_CMD" = "$MASTER_SSH" ]; then
+            is_same="true"
+        fi
+
+        local derived_env="envs/${m_inst_id:-dbhub}-replica.env"
+        log_info "Deriving replica configuration into: $derived_env"
+        local master_local_file="$PROJECT_ROOT/$MASTER_ENV"
+        if [ ! -f "$master_local_file" ] && [ -f "$MASTER_ENV" ]; then
+            master_local_file="$MASTER_ENV"
+        fi
+
+        # If master is remote, download master env to temp
+        if [ -n "$MASTER_SSH" ] && [ ! -f "$master_local_file" ]; then
+            setup_ssh_wrapper "$MASTER_SSH"
+            master_local_file="/tmp/master_${m_inst_id:-dbhub}.env"
+            run_remote_cmd "cat '$REMOTE_DIR/$MASTER_ENV'" > "$master_local_file"
+        fi
+
+        local m_host="127.0.0.1"
+        if [ -n "$MASTER_SSH" ]; then
+            m_host=$(get_remote_host)
+        fi
+
+        derive_replica_env "$master_local_file" "$PROJECT_ROOT/$derived_env" "$m_host" "$is_same" 10 "$MAX_RATE"
+        ENV_FILE="$derived_env"
+        log_success "Generated replica configuration: $ENV_FILE"
+    fi
 
     # If action is up (Deploy), ask about databases and auto-backup
     if [ "$ACTION" = "up" ]; then
@@ -398,6 +537,20 @@ execute_local() {
         restore)
             bash "$PROJECT_ROOT/scripts/restore.sh" --local --env "$ENV_FILE"
             ;;
+        make-master)
+            log_step "Upgrading instance [${INSTANCE_ID:-database-hub}] to Master..."
+            bash "$PROJECT_ROOT/scripts/replication.sh" make-master --env "$ENV_FILE" --db "$SELECTED_DBS"
+            ;;
+        deploy-replica)
+            log_step "Deploying replica for [${INSTANCE_ID:-database-hub}]..."
+            bash "$PROJECT_ROOT/scripts/replication.sh" deploy-replica --env "$ENV_FILE" --master-env "${MASTER_ENV:-}" --master-ssh "${MASTER_SSH:-}" --db "$SELECTED_DBS" --max-rate "$MAX_RATE"
+            ;;
+        repl-status)
+            bash "$PROJECT_ROOT/scripts/replication.sh" status --env "$ENV_FILE"
+            ;;
+        scan)
+            bash "$PROJECT_ROOT/scripts/replication.sh" scan
+            ;;
         *)
             log_error "Unknown action: $ACTION"
             exit 1
@@ -425,15 +578,21 @@ execute_remote() {
     fi
     echo -e "${GREEN}[OK]${NC}"
 
-    # For backup-status, restore, or backup actions, we can run them directly
+    # Fast remote actions that can execute immediately without re-sync
     if [ "$ACTION" = "backup-status" ]; then
-        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env .env status"
+        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env '${ENV_FILE:-.env}' status"
         return
     elif [ "$ACTION" = "backup" ]; then
-        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env .env run-all"
+        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env '${ENV_FILE:-.env}' run-all"
         return
     elif [ "$ACTION" = "restore" ]; then
         bash "$PROJECT_ROOT/scripts/restore.sh" --ssh "$SSH_CMD" --env "$ENV_FILE" --remote-dir "$REMOTE_DIR"
+        return
+    elif [ "$ACTION" = "repl-status" ]; then
+        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/replication.sh status --env '${ENV_FILE:-.env}'"
+        return
+    elif [ "$ACTION" = "scan" ]; then
+        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/replication.sh scan"
         return
     fi
 
@@ -469,12 +628,19 @@ execute_remote() {
     tar --exclude='.git' --exclude='data' --exclude='*.log' --exclude='backups' -czf - -C "$PROJECT_ROOT" . | \
         run_remote_cmd "mkdir -p '$REMOTE_DIR' && tar -xzf - -C '$REMOTE_DIR'"
 
-    # 5. Sync the specified .env file
-    log_info "Deploying environment configuration (.env)..."
-    cat "$ENV_FILE" | run_remote_cmd "cat > '$REMOTE_DIR/.env'"
+    # 5. Sync the specified .env file safely to its relative path
+    local remote_env_rel="${ENV_FILE:-.env}"
+    if [[ "$remote_env_rel" = /* ]]; then
+        remote_env_rel="${remote_env_rel#$PROJECT_ROOT/}"
+    fi
+    remote_env_rel="${remote_env_rel#./}"
+
+    log_info "Deploying environment configuration ($remote_env_rel)..."
+    run_remote_cmd "mkdir -p '$REMOTE_DIR/$(dirname "$remote_env_rel")'"
+    cat "$ENV_FILE" | run_remote_cmd "cat > '$REMOTE_DIR/$remote_env_rel'"
 
     local compose_base
-    compose_base=$(build_compose_command ".env")
+    compose_base=$(build_compose_command "$remote_env_rel")
 
     # 6. Execute Remote Action
     case "$ACTION" in
@@ -483,15 +649,23 @@ execute_remote() {
             run_remote_cmd "cd '$REMOTE_DIR' && $compose_base up -d"
             log_success "Remote deployment initiated. Waiting for healthcheck..."
             sleep 4
-            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh .env"
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh '$remote_env_rel'"
             print_connection_summary "$remote_host" "$ENV_FILE" "$SELECTED_DBS"
 
             if [ "$ENABLE_AUTO_BACKUP" = true ]; then
                 log_step "Configuring and starting automated backup daemon on remote..."
-                run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env .env enable '$AUTO_BACKUP_SCHEDULE' '$AUTO_BACKUP_RETENTION'"
+                run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env '$remote_env_rel' enable '$AUTO_BACKUP_SCHEDULE' '$AUTO_BACKUP_RETENTION'"
                 echo ""
-                run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env .env status"
+                run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env '$remote_env_rel' status"
             fi
+            ;;
+        make-master)
+            log_step "Upgrading instance to Master on remote host..."
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/replication.sh make-master --env '$remote_env_rel' --db '$SELECTED_DBS'"
+            ;;
+        deploy-replica)
+            log_step "Deploying replica on remote host..."
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/replication.sh deploy-replica --env '$remote_env_rel' --master-env '${MASTER_ENV:-}' --master-ssh '${MASTER_SSH:-}' --db '$SELECTED_DBS' --max-rate '$MAX_RATE'"
             ;;
         down)
             log_warn "Stopping containers on remote host..."
@@ -501,12 +675,12 @@ execute_remote() {
         restart)
             log_step "Restarting containers on remote host..."
             run_remote_cmd "cd '$REMOTE_DIR' && $compose_base restart"
-            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh .env"
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh '$remote_env_rel'"
             ;;
         status)
-            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh .env"
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh '$remote_env_rel'"
             echo ""
-            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env .env status"
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env '$remote_env_rel' status"
             ;;
         logs)
             run_remote_cmd "cd '$REMOTE_DIR' && $compose_base logs -f --tail=100"
