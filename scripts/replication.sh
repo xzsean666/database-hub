@@ -252,7 +252,7 @@ do_deploy_replica() {
     # 1. Bootstrap PostgreSQL if selected
     if [[ "$TARGET_DBS" == "all" ]] || [[ "$TARGET_DBS" == *"postgres"* ]]; then
         local pg_m_port="${POSTGRES_MASTER_PORT:-${POSTGRES_PORT:-5432}}"
-        local pg_r_data="${POSTGRES_DATA_DIR:-${DATA_DIR:-./data}/postgres}"
+        local pg_r_data="${POSTGRES_DATA_DIR:-/app/database/postgres/${POSTGRES_CONTAINER_NAME:-${r_inst}-postgres}}"
         local pg_repl_user="repl_${m_inst//-/_}"
         local pg_repl_pass=""
 
@@ -277,7 +277,7 @@ do_deploy_replica() {
         fi
 
         # Execute throttled physical base backup
-        postgres_bootstrap_replica "$m_host" "$pg_m_port" "$pg_repl_user" "$pg_repl_pass" "$pg_r_data" "$MAX_RATE" "${POSTGRES_IMAGE:-postgres:16-alpine}"
+        postgres_bootstrap_replica "$m_host" "$pg_m_port" "$pg_repl_user" "$pg_repl_pass" "$pg_r_data" "$MAX_RATE" "${POSTGRES_IMAGE:-postgres:18-alpine}"
     fi
 
     # 2. Launch Replica Containers via Docker Compose

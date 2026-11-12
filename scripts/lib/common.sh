@@ -105,8 +105,87 @@ load_env_file() {
     source "$abs_path"
     set +a
 
+    resolve_database_data_dirs
+
     ENV_FILE_LOADED="$abs_path"
     return 0
+}
+
+# ==============================================================================
+# Database Data Directory Resolver
+# Default base directory: /app/database
+# Hierarchy: /app/database/<engine>/<container_name>
+# If DATA_DIR or <DB>_DATA_DIR is absolute path: respect specified path
+# If relative (./...): resolve under /app/database/<engine>/...
+# ==============================================================================
+resolve_single_db_dir() {
+    local db_type="$1"
+    local container_name="$2"
+    local specific_dir="${3:-}"
+    local global_dir="${4:-}"
+
+    if [ -n "$specific_dir" ]; then
+        if [[ "$specific_dir" =~ ^/ ]]; then
+            echo "$specific_dir"
+            return 0
+        elif [[ "$specific_dir" =~ ^\./ ]]; then
+            local sub="${specific_dir#./}"
+            sub="${sub#$db_type/}"
+            if [ -z "$sub" ] || [ "$sub" = "data" ]; then
+                sub="$container_name"
+            fi
+            echo "/app/database/$db_type/$sub"
+            return 0
+        else
+            echo "/app/database/$db_type/$specific_dir"
+            return 0
+        fi
+    fi
+
+    if [ -n "$global_dir" ]; then
+        if [[ "$global_dir" =~ ^/ ]]; then
+            if [[ "$global_dir" == *"/$db_type" ]] || [[ "$global_dir" == *"/$container_name" ]]; then
+                echo "$global_dir"
+            else
+                echo "${global_dir%/}/$db_type/$container_name"
+            fi
+            return 0
+        elif [[ "$global_dir" =~ ^\./ ]]; then
+            local sub="${global_dir#./}"
+            if [[ "$sub" == data/* ]]; then
+                sub="${sub#data/}"
+            elif [ "$sub" = "data" ]; then
+                sub=""
+            fi
+            if [ -z "$sub" ]; then
+                sub="$container_name"
+            fi
+            echo "/app/database/$db_type/$sub"
+            return 0
+        else
+            echo "/app/database/$db_type/$global_dir"
+            return 0
+        fi
+    fi
+
+    echo "/app/database/$db_type/$container_name"
+}
+
+resolve_database_data_dirs() {
+    local inst="${INSTANCE_ID:-database-hub}"
+
+    POSTGRES_CONTAINER_NAME="${POSTGRES_CONTAINER_NAME:-${inst}-postgres}"
+    MYSQL_CONTAINER_NAME="${MYSQL_CONTAINER_NAME:-${inst}-mysql}"
+    MONGO_CONTAINER_NAME="${MONGO_CONTAINER_NAME:-${inst}-mongodb}"
+    REDIS_CONTAINER_NAME="${REDIS_CONTAINER_NAME:-${inst}-redis}"
+
+    POSTGRES_DATA_DIR=$(resolve_single_db_dir "postgres" "$POSTGRES_CONTAINER_NAME" "${POSTGRES_DATA_DIR:-}" "${DATA_DIR:-}")
+    MYSQL_DATA_DIR=$(resolve_single_db_dir "mysql" "$MYSQL_CONTAINER_NAME" "${MYSQL_DATA_DIR:-}" "${DATA_DIR:-}")
+    MONGO_DATA_DIR=$(resolve_single_db_dir "mongodb" "$MONGO_CONTAINER_NAME" "${MONGO_DATA_DIR:-}" "${DATA_DIR:-}")
+    REDIS_DATA_DIR=$(resolve_single_db_dir "redis" "$REDIS_CONTAINER_NAME" "${REDIS_DATA_DIR:-}" "${DATA_DIR:-}")
+
+    export POSTGRES_CONTAINER_NAME MYSQL_CONTAINER_NAME MONGO_CONTAINER_NAME REDIS_CONTAINER_NAME
+    export POSTGRES_DATA_DIR MYSQL_DATA_DIR MONGO_DATA_DIR REDIS_DATA_DIR
 }
 
 # ==============================================================================

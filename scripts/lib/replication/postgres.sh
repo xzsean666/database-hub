@@ -64,7 +64,7 @@ postgres_bootstrap_replica() {
     local repl_pass="$4"
     local replica_data_dir="$5"
     local max_rate="${6:-30M}"
-    local image="${7:-postgres:16-alpine}"
+    local image="${7:-postgres:18-alpine}"
 
     log_step "Bootstrapping PostgreSQL replica data from Master ($master_host:$master_port)..."
     log_info "Bandwidth limit: ${max_rate} (Zero impact on Master workload)"

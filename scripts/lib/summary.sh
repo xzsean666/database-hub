@@ -59,7 +59,7 @@ print_connection_summary() {
     echo -e "Host: \033[0;36m${host}\033[0m  |  Instance ID: \033[0;36m${inst_id}\033[0m\n"
 
     if [[ "$selected_dbs" == *"postgres"* ]] || [ "$selected_dbs" = "all" ]; then
-        echo -e "\033[1m[PostgreSQL 16]\033[0m"
+        echo -e "\033[1m[PostgreSQL 18]\033[0m"
         echo -e "  Port:      ${pg_port}"
         echo -e "  Database:  ${pg_db}"
         echo -e "  User:      ${pg_user}"
@@ -69,16 +69,17 @@ print_connection_summary() {
     fi
 
     if [[ "$selected_dbs" == *"mysql"* ]] || [ "$selected_dbs" = "all" ]; then
-        echo -e "\033[1m[MySQL 8.x]\033[0m"
+        echo -e "\033[1m[MySQL 8.4 LTS]\033[0m"
         echo -e "  Port:      ${my_port}"
         echo -e "  Database:  ${my_db}"
         echo -e "  User:      ${my_user} (or root)"
         echo -e "  Password:  ${my_pass} (root: ${my_root_pass})"
+        echo -e "  URI:       \033[0;36mmysql://${my_user}:${my_pass}@${host}:${my_port}/${my_db}\033[0m"
         echo -e "  CLI:       mysql -h ${host} -P ${my_port} -u ${my_user} -p\n"
     fi
 
     if [[ "$selected_dbs" == *"mongo"* ]] || [ "$selected_dbs" = "all" ]; then
-        echo -e "\033[1m[MongoDB 7.0]\033[0m"
+        echo -e "\033[1m[MongoDB 8.0]\033[0m"
         echo -e "  Port:      ${mongo_port}"
         echo -e "  Database:  ${mongo_db}"
         echo -e "  User:      ${mongo_user}"
@@ -88,7 +89,7 @@ print_connection_summary() {
     fi
 
     if [[ "$selected_dbs" == *"redis"* ]] || [ "$selected_dbs" = "all" ]; then
-        echo -e "\033[1m[Redis 7.2]\033[0m"
+        echo -e "\033[1m[Redis 7.4]\033[0m"
         echo -e "  Port:      ${redis_port}"
         echo -e "  Password:  ${redis_pass}"
         echo -e "  URI:       \033[0;36mredis://:${redis_pass}@${host}:${redis_port}\033[0m"

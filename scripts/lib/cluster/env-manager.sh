@@ -169,7 +169,7 @@ DOCKER_NETWORK_NAME=${r_inst}-net
 # ==============================================================================
 # 1. PostgreSQL Replica Settings
 # ==============================================================================
-POSTGRES_IMAGE=${POSTGRES_IMAGE:-postgres:16-alpine}
+POSTGRES_IMAGE=${POSTGRES_IMAGE:-postgres:18-alpine}
 POSTGRES_CONTAINER_NAME=${r_inst}-postgres
 POSTGRES_PORT=${pg_r_port}
 POSTGRES_MASTER_PORT=${pg_m_port}
@@ -186,7 +186,7 @@ POSTGRES_EFFECTIVE_CACHE_SIZE=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}
 # ==============================================================================
 # 2. MySQL Replica Settings
 # ==============================================================================
-MYSQL_IMAGE=${MYSQL_IMAGE:-mysql:8.0}
+MYSQL_IMAGE=${MYSQL_IMAGE:-mysql:8.4}
 MYSQL_CONTAINER_NAME=${r_inst}-mysql
 MYSQL_PORT=${my_r_port}
 MYSQL_MASTER_PORT=${my_m_port}
@@ -203,7 +203,7 @@ MYSQL_MAX_CONNECTIONS=${MYSQL_MAX_CONNECTIONS:-300}
 # ==============================================================================
 # 3. Redis Replica Settings
 # ==============================================================================
-REDIS_IMAGE=${REDIS_IMAGE:-redis:7.2-alpine}
+REDIS_IMAGE=${REDIS_IMAGE:-redis:7.4-alpine}
 REDIS_CONTAINER_NAME=${r_inst}-redis
 REDIS_PORT=${rd_r_port}
 REDIS_MASTER_HOST=${master_host}
@@ -218,7 +218,7 @@ REDIS_MAXMEMORY_POLICY=${REDIS_MAXMEMORY_POLICY:-allkeys-lru}
 # ==============================================================================
 # 4. MongoDB Replica Settings
 # ==============================================================================
-MONGO_IMAGE=${MONGO_IMAGE:-mongo:7.0}
+MONGO_IMAGE=${MONGO_IMAGE:-mongo:8.0}
 MONGO_CONTAINER_NAME=${r_inst}-mongodb
 MONGO_PORT=${mg_r_port}
 MONGO_MASTER_PORT=${mg_m_port}

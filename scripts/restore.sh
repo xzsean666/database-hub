@@ -286,7 +286,7 @@ execute_restore_local() {
             ;;
         redis)
             local container="${REDIS_CONTAINER_NAME:-${inst_id}-redis}"
-            local data_dir="${DATA_DIR:-./data}/redis"
+            local data_dir="${REDIS_DATA_DIR:-/app/database/redis/${container}}"
 
             log_info "Stopping Redis container '$container' for consistent snapshot restore..."
             docker stop "$container" >/dev/null
@@ -374,7 +374,7 @@ execute_restore_remote() {
                 ;;
             redis)
                 container="${REDIS_CONTAINER_NAME:-${inst_id}-redis}"
-                data_dir="${DATA_DIR:-./data}/redis"
+                data_dir="${REDIS_DATA_DIR:-/app/database/redis/${container}}"
                 echo "[INFO] Stopping Redis container '\''$container'\''..."
                 docker stop "$container" >/dev/null
                 echo "[INFO] Restoring Redis data into $data_dir..."

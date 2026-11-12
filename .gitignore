@@ -7,7 +7,7 @@ envs/**/.env*
 envs/**/local.env
 envs/**/prod.env
 envs/**/dev.env
-
+envs/cmd
 # Explicitly track all example files
 !**/*.example
 !.env.example

@@ -1,7 +1,20 @@
 # Database Hub 🚀
 
 > **A high-performance, modular database management and deployment toolkit for Local and Remote (SSH) Linux environments.**  
-> Supports **PostgreSQL 16**, **MySQL 8.x**, **MongoDB 7.0**, and **Redis 7.2**, with deep production tuning, **automated extreme-compression backups (`zstd -19`)**, self-starting timers, retention pruning, and a **universal one-command restore engine**.
+> Supports **PostgreSQL 18**, **MySQL 8.4 LTS**, **MongoDB 8.0**, and **Redis 7.4**, with deep production tuning, **automated extreme-compression backups (`zstd -19`)**, self-starting timers, retention pruning, and a **universal one-command restore engine**.
+
+---
+
+## 📦 Supported Database Engines & Versions
+
+| Engine | Supported / Default Image | Container Name Pattern | Default Internal Port | Backup Strategy |
+|---|---|---|---|---|
+| **PostgreSQL** | `postgres:18-alpine` (PostgreSQL 18) | `${INSTANCE_ID}-postgres` | `5432` | `pg_dump` stream + `zstd -19` / `pg_basebackup` |
+| **MySQL** | `mysql:8.4` (MySQL 8.4 LTS) | `${INSTANCE_ID}-mysql` | `3306` | `mysqldump` stream + `zstd -19` / Binlog replication |
+| **MongoDB** | `mongo:8.0` (MongoDB 8.0) | `${INSTANCE_ID}-mongodb` | `27017` | `mongodump` archive stream + `zstd -19` |
+| **Redis** | `redis:7.4-alpine` (Redis 7.4) | `${INSTANCE_ID}-redis` | `6379` | RDB snapshot stream + `zstd -19` |
+
+> 💡 Detailed operational guide & AI skill: see [docs/SKILL.md](file:///ssd0/git/database-hub/docs/SKILL.md).
 
 ---
 
@@ -40,6 +53,8 @@ database-hub/
 ├── deploy.sh                     # Compatibility wrapper (forwards to dbhub.sh)
 ├── docker-compose.yml            # Docker Compose specification with modular profiles
 ├── .env.example                  # Environment configuration with backup & tuning options
+├── docs/                         # Documentation and operational skills
+│   └── SKILL.md                  # Comprehensive operational guide for humans and AI agents
 ├── envs/                         # Database-specific environment templates (dev & prod)
 ├── configs/                      # Database configuration templates & init scripts
 │   ├── postgres/                 # PostgreSQL performance configs
@@ -274,5 +289,8 @@ Simply run `./dbhub.sh` to launch the interactive menu, select `10) make-master`
 
 1. **Firewall & Bind IP**: By default, ports bind to `BIND_IP=0.0.0.0`. If you only want local container-to-container access, change `BIND_IP=127.0.0.1` in your `.env`.
 2. **Strong Passwords**: Never use default passwords in production. Set strong passwords in `.env`.
-3. **Data Persistence**: All container data is stored in `${DATA_DIR:-./data}/<db_name>` on the host.
+3. **Data Persistence & Storage Path**:
+   - **Default Path**: All databases default to host path `/app/database/<engine>/<container_name>` (e.g. `/app/database/mysql/<container_name>`).
+   - **Custom Absolute Path**: If `DATA_DIR` or `<DB>_DATA_DIR` is set to an absolute path (e.g. `/var/data`), it follows the specified path.
+   - **Relative Path**: If set to a relative path starting with `./` (e.g. `./data` or `./my-instance`), it automatically normalizes under `/app/database/<engine>/...`.
 4. **Backup Protection**: Backups are generated in `backups/` and excluded from git version control.

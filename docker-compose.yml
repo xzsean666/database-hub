@@ -2,11 +2,11 @@ name: ${COMPOSE_PROJECT_NAME:-${INSTANCE_ID:-database-hub}}
 
 services:
   # ============================================================================
-  # PostgreSQL (PostgreSQL 16)
+  # PostgreSQL (PostgreSQL 18)
   # High performance relational database with custom memory & SSD optimizations
   # ============================================================================
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine}
     container_name: ${POSTGRES_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-postgres}
     profiles: ["postgres", "all"]
     restart: unless-stopped
@@ -40,7 +40,7 @@ services:
     ports:
       - "${BIND_IP:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - "${POSTGRES_DATA_DIR:-${DATA_DIR:-./data}/postgres}:/var/lib/postgresql/data"
+      - "${POSTGRES_DATA_DIR:-/app/database/postgres/${POSTGRES_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-postgres}}:/var/lib/postgresql/data"
       - "./configs/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro"
       - "./configs/postgres/conf.d:/etc/postgresql/conf.d:ro"
       - "./configs/postgres/init:/docker-entrypoint-initdb.d:ro"
@@ -60,11 +60,11 @@ services:
       - database-hub-net
 
   # ============================================================================
-  # MySQL (MySQL 8.0 / 8.4)
+  # MySQL (MySQL 8.4 LTS)
   # InnoDB optimized with direct I/O, skip DNS resolution, buffer pool sizing
   # ============================================================================
   mysql:
-    image: ${MYSQL_IMAGE:-mysql:8.0}
+    image: ${MYSQL_IMAGE:-mysql:8.4}
     container_name: ${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}
     profiles: ["mysql", "all"]
     restart: unless-stopped
@@ -84,7 +84,7 @@ services:
     ports:
       - "${BIND_IP:-0.0.0.0}:${MYSQL_PORT:-3306}:3306"
     volumes:
-      - "${MYSQL_DATA_DIR:-${DATA_DIR:-./data}/mysql}:/var/lib/mysql"
+      - "${MYSQL_DATA_DIR:-/app/database/mysql/${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}}:/var/lib/mysql"
       - "./configs/mysql/conf.d:/etc/mysql/conf.d:ro"
       - "./configs/mysql/init:/docker-entrypoint-initdb.d:ro"
     ulimits:
@@ -103,11 +103,11 @@ services:
       - database-hub-net
 
   # ============================================================================
-  # MongoDB (MongoDB 7.0)
+  # MongoDB (MongoDB 8.0)
   # Document database optimized with WiredTiger caching & compression
   # ============================================================================
   mongodb:
-    image: ${MONGO_IMAGE:-mongo:7.0}
+    image: ${MONGO_IMAGE:-mongo:8.0}
     container_name: ${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}
     profiles: ["mongodb", "all"]
     restart: unless-stopped
@@ -129,7 +129,7 @@ services:
     ports:
       - "${BIND_IP:-0.0.0.0}:${MONGO_PORT:-27017}:27017"
     volumes:
-      - "${MONGO_DATA_DIR:-${DATA_DIR:-./data}/mongodb}:/data/db"
+      - "${MONGO_DATA_DIR:-/app/database/mongodb/${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}}:/data/db"
       - "./configs/mongodb/mongod.conf:/etc/mongod.conf:ro"
       - "./configs/mongodb/keys:/etc/mongodb/keys:ro"
       - "./configs/mongodb/init:/docker-entrypoint-initdb.d:ro"
@@ -152,11 +152,11 @@ services:
       - database-hub-net
 
   # ============================================================================
-  # Redis (Redis 7.2)
+  # Redis (Redis 7.4)
   # In-memory data store with multithreaded I/O, AOF persistence & LRU eviction
   # ============================================================================
   redis:
-    image: ${REDIS_IMAGE:-redis:7.2-alpine}
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
     container_name: ${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}
     profiles: ["redis", "all"]
     restart: unless-stopped
@@ -182,7 +182,7 @@ services:
     ports:
       - "${BIND_IP:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
     volumes:
-      - "${REDIS_DATA_DIR:-${DATA_DIR:-./data}/redis}:/data"
+      - "${REDIS_DATA_DIR:-/app/database/redis/${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}}:/data"
       - "./configs/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
     sysctls:
       net.core.somaxconn: 1024

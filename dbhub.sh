@@ -507,6 +507,12 @@ execute_local() {
 
     ensure_mongodb_keyfile
 
+    # Ensure database host directories exist
+    mkdir -p "${POSTGRES_DATA_DIR:-/app/database/postgres/$POSTGRES_CONTAINER_NAME}" \
+             "${MYSQL_DATA_DIR:-/app/database/mysql/$MYSQL_CONTAINER_NAME}" \
+             "${MONGO_DATA_DIR:-/app/database/mongodb/$MONGO_CONTAINER_NAME}" \
+             "${REDIS_DATA_DIR:-/app/database/redis/$REDIS_CONTAINER_NAME}" 2>/dev/null || true
+
     local compose_base
     compose_base=$(build_compose_command "$ENV_FILE")
 
@@ -662,6 +668,15 @@ execute_remote() {
     log_info "Deploying environment configuration ($remote_env_rel)..."
     run_remote_cmd "mkdir -p '$REMOTE_DIR/$(dirname "$remote_env_rel")'"
     cat "$ENV_FILE" | run_remote_cmd "cat > '$REMOTE_DIR/$remote_env_rel'"
+
+    # Ensure resolved host database directories exist and env has explicit data paths
+    run_remote_cmd "
+        grep -q '^[[:space:]]*POSTGRES_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'POSTGRES_DATA_DIR=$POSTGRES_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
+        grep -q '^[[:space:]]*MYSQL_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'MYSQL_DATA_DIR=$MYSQL_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
+        grep -q '^[[:space:]]*MONGO_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'MONGO_DATA_DIR=$MONGO_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
+        grep -q '^[[:space:]]*REDIS_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'REDIS_DATA_DIR=$REDIS_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
+        mkdir -p '$POSTGRES_DATA_DIR' '$MYSQL_DATA_DIR' '$MONGO_DATA_DIR' '$REDIS_DATA_DIR' 2>/dev/null || true
+    "
 
     local compose_base
     compose_base=$(build_compose_command "$remote_env_rel")
