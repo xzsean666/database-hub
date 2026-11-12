@@ -129,6 +129,16 @@ do_make_master() {
     local pg_repl_user="" pg_repl_pass=""
     local my_repl_user="" my_repl_pass=""
 
+    # Load existing metadata if available to preserve prior credentials
+    local existing_meta=""
+    existing_meta=$(load_metadata "$inst_id" "$PROJECT_ROOT" || true)
+    if [ -n "$existing_meta" ]; then
+        pg_repl_user=$(read_json_val "$existing_meta" ".databases.postgres.repl_user")
+        pg_repl_pass=$(read_json_val "$existing_meta" ".databases.postgres.repl_pass")
+        my_repl_user=$(read_json_val "$existing_meta" ".databases.mysql.repl_user")
+        my_repl_pass=$(read_json_val "$existing_meta" ".databases.mysql.repl_pass")
+    fi
+
     # 1. PostgreSQL
     if [[ "$TARGET_DBS" == "all" ]] || [[ "$TARGET_DBS" == *"postgres"* ]]; then
         local pg_ctr="${POSTGRES_CONTAINER_NAME:-${inst_id}-postgres}"
@@ -209,6 +219,19 @@ do_make_master() {
 # ==============================================================================
 do_deploy_replica() {
     local replica_env="${ENV_FILE:-.env}"
+
+    # Auto-derive replica environment if target env file doesn't exist yet but master env is given
+    if [ ! -f "$replica_env" ] && [ -n "$MASTER_ENV" ]; then
+        log_info "Replica env '$replica_env' does not exist. Deriving from Master env '$MASTER_ENV'..."
+        local is_same="true"
+        if [ -n "$MASTER_SSH" ]; then is_same="false"; fi
+        local m_host="${MASTER_HOST_OVERRIDE:-}"
+        if [ -z "$m_host" ]; then
+            m_host=$(detect_primary_ip)
+        fi
+        derive_replica_env "$MASTER_ENV" "$replica_env" "$m_host" "$is_same" 10 "$MAX_RATE"
+    fi
+
     load_env_file "$replica_env" "$PROJECT_ROOT" || true
 
     local r_inst="${INSTANCE_ID:-database-hub-replica}"
@@ -275,6 +298,16 @@ do_deploy_replica() {
             esac
         done
     fi
+
+    # Ensure MongoDB keyfile exists for container mounting
+    local keyfile="$PROJECT_ROOT/configs/mongodb/keys/mongo-keyfile"
+    if [ ! -f "$keyfile" ]; then
+        mkdir -p "$(dirname "$keyfile")"
+        openssl rand -base64 756 > "$keyfile" 2>/dev/null || head -c 512 /dev/urandom | base64 > "$keyfile"
+        chown 999:999 "$keyfile" 2>/dev/null || true
+        chmod 400 "$keyfile" 2>/dev/null || true
+    fi
+
     local compose_cmd="docker compose -p $r_inst --env-file $replica_env $profile_flags up -d"
     eval "$compose_cmd"
 
@@ -316,6 +349,11 @@ do_deploy_replica() {
         slave_host=$(detect_primary_ip "$m_host")
         if [ -n "$MASTER_SSH" ]; then
             run_remote_cmd "cd /opt/database-hub && bash scripts/replication.sh register-mongo-member --env .env --slave-host '$slave_host' --slave-port '${MONGO_PORT:-27017}'" || true
+        else
+            local m_ctr="${m_inst}-mongodb"
+            if docker ps --format '{{.Names}}' | grep -q "^${m_ctr}$"; then
+                mongodb_bootstrap_replica "$m_host" "$mg_m_port" "$m_ctr" "${MONGO_INITDB_ROOT_USERNAME:-root}" "${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_pass_2026}" "$slave_host" "${MONGO_PORT:-27017}"
+            fi
         fi
     fi
 

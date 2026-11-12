@@ -20,6 +20,7 @@ binlog_format = ROW
 gtid_mode = ON
 enforce_gtid_consistency = ON
 binlog_expire_logs_seconds = 604800
+replica_skip_errors = ddl_exist_errors,1396
 
 # Character Set & Collation (Full UTF-8 support)
 character-set-server = utf8mb4

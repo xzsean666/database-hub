@@ -39,21 +39,32 @@ redis_bootstrap_replica() {
 
     log_step "Attaching Redis replica '$replica_container' to Master ($master_host:$master_port)..."
 
-    # Configure masterauth and replicaof dynamically
-    if [ -n "$replica_pass" ]; then
-        if [ -n "$master_pass" ]; then
-            docker exec -i "$replica_container" redis-cli -a "$replica_pass" CONFIG SET masterauth "$master_pass" >/dev/null 2>&1 || true
+    local attempts=0
+    local max_attempts=15
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        if [ -n "$replica_pass" ]; then
+            if [ -n "$master_pass" ]; then
+                docker exec -i "$replica_container" redis-cli -a "$replica_pass" CONFIG SET masterauth "$master_pass" >/dev/null 2>&1 || true
+            fi
+            if docker exec -i "$replica_container" redis-cli -a "$replica_pass" REPLICAOF "$master_host" "$master_port" >/dev/null 2>&1; then
+                log_success "Redis replica successfully linked to Master."
+                return 0
+            fi
+        else
+            if [ -n "$master_pass" ]; then
+                docker exec -i "$replica_container" redis-cli CONFIG SET masterauth "$master_pass" >/dev/null 2>&1 || true
+            fi
+            if docker exec -i "$replica_container" redis-cli REPLICAOF "$master_host" "$master_port" >/dev/null 2>&1; then
+                log_success "Redis replica successfully linked to Master."
+                return 0
+            fi
         fi
-        docker exec -i "$replica_container" redis-cli -a "$replica_pass" REPLICAOF "$master_host" "$master_port" >/dev/null 2>&1
-    else
-        if [ -n "$master_pass" ]; then
-            docker exec -i "$replica_container" redis-cli CONFIG SET masterauth "$master_pass" >/dev/null 2>&1 || true
-        fi
-        docker exec -i "$replica_container" redis-cli REPLICAOF "$master_host" "$master_port" >/dev/null 2>&1
-    fi
+        sleep 2
+        attempts=$((attempts + 1))
+    done
 
-    log_success "Redis replica successfully linked to Master."
-    return 0
+    log_error "Failed to link Redis replica '$replica_container' to Master after $max_attempts attempts."
+    return 1
 }
 
 redis_get_lag() {

@@ -32,6 +32,12 @@ backups/
 *.log
 logs/
 
+# Cluster metadata & Security keys
+metadata/
+configs/mongodb/keys/
+*.key
+*-keyfile
+
 # OS and Editor files
 .DS_Store
 *.swp

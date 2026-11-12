@@ -23,10 +23,10 @@ mysql_make_master() {
     repl_pass=$(generate_random_secret 24)
 
     log_info "Creating replication user '$repl_user' in MySQL..."
-    docker exec -i "$container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF
+    docker exec -i "$container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF || true
 CREATE USER IF NOT EXISTS '${repl_user}'@'%' IDENTIFIED BY '${repl_pass}';
-GRANT REPLICATION SLAVE, REPLICATION CLIENT, BACKUP_ADMIN, CLONE_ADMIN ON *.* TO '${repl_user}'@'%';
-INSTALL PLUGIN clone SONAME 'mysql_clone.so';
+ALTER USER '${repl_user}'@'%' IDENTIFIED BY '${repl_pass}';
+GRANT REPLICATION SLAVE, REPLICATION CLIENT, BACKUP_ADMIN ON *.* TO '${repl_user}'@'%';
 FLUSH PRIVILEGES;
 EOF
 
@@ -46,27 +46,11 @@ mysql_bootstrap_replica() {
 
     log_step "Setting up MySQL replica on container '$replica_container'..."
 
-    # Ensure clone plugin is loaded on replica
-    docker exec -i "$replica_container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF
-INSTALL PLUGIN clone SONAME 'mysql_clone.so';
-EOF
-
-    log_info "Cloning instance data from Master ($master_host:$master_port)..."
-    # Execute clone instance from master
-    if docker exec -i "$replica_container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF
-SET GLOBAL clone_valid_donor_list = '${master_host}:${master_port}';
-CLONE INSTANCE FROM '${repl_user}'@'${master_host}':${master_port} IDENTIFIED BY '${repl_pass}';
-EOF
-    then
-        log_success "MySQL instance cloned successfully from Master."
-        # Wait a few seconds for clone engine restart
-        sleep 5
-    else
-        log_warn "Clone plugin encountered an issue, falling back to GTID auto-positioning..."
-    fi
-
     log_info "Configuring GTID replication channel and read-only mode..."
-    docker exec -i "$replica_container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF
+    local attempts=0
+    local max_attempts=30
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        if docker exec -i "$replica_container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF
 STOP REPLICA;
 CHANGE REPLICATION SOURCE TO
   SOURCE_HOST='${master_host}',
@@ -79,9 +63,16 @@ START REPLICA;
 SET GLOBAL read_only = ON;
 SET GLOBAL super_read_only = ON;
 EOF
+        then
+            log_success "MySQL replica configured and synchronized with Master."
+            return 0
+        fi
+        sleep 2
+        attempts=$((attempts + 1))
+    done
 
-    log_success "MySQL replica configured and synchronized with Master."
-    return 0
+    log_error "Failed to configure MySQL replica on '$replica_container' after $max_attempts attempts."
+    return 1
 }
 
 mysql_get_lag() {

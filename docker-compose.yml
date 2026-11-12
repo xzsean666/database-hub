@@ -15,6 +15,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-app_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_pass}
+      PGDATA: ${POSTGRES_PGDATA:-/var/lib/postgresql/data}
       TZ: ${TZ:-UTC}
     command:
       - "postgres"
@@ -116,18 +117,15 @@ services:
       MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-app_db}
       TZ: ${TZ:-UTC}
     command:
-      - "sh"
-      - "-c"
-      - >
-        EXTRA_FLAGS="";
-        if [ -n "$$MONGO_REPL_SET_NAME" ]; then
-          EXTRA_FLAGS="--replSet $$MONGO_REPL_SET_NAME";
-        fi;
-        if [ -f "/etc/mongodb/keys/mongo-keyfile" ]; then
-          chmod 400 /etc/mongodb/keys/mongo-keyfile 2>/dev/null || true;
-          EXTRA_FLAGS="$$EXTRA_FLAGS --keyFile /etc/mongodb/keys/mongo-keyfile";
-        fi;
-        exec mongod --config /etc/mongod.conf --wiredTigerCacheSizeGB "$${MONGO_CACHE_SIZE_GB:-2}" $$EXTRA_FLAGS
+      - "mongod"
+      - "--config"
+      - "/etc/mongod.conf"
+      - "--wiredTigerCacheSizeGB"
+      - "${MONGO_CACHE_SIZE_GB:-2}"
+      - "--replSetName"
+      - "${MONGO_REPL_SET_NAME:-rs0}"
+      - "--keyFile"
+      - "/etc/mongodb/keys/mongo-keyfile"
     ports:
       - "${BIND_IP:-0.0.0.0}:${MONGO_PORT:-27017}:27017"
     volumes:

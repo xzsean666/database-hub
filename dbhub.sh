@@ -156,6 +156,14 @@ parse_args() {
                 ROLE="replica"
                 shift
                 ;;
+            --scan)
+                ACTION="scan"
+                shift
+                ;;
+            --repl-status)
+                ACTION="repl-status"
+                shift
+                ;;
             --master-ssh)
                 MASTER_SSH="$2"
                 shift 2
@@ -468,6 +476,20 @@ build_compose_command() {
 # ==============================================================================
 # Local Execution Routine
 # ==============================================================================
+ensure_mongodb_keyfile() {
+    local keyfile="$PROJECT_ROOT/configs/mongodb/keys/mongo-keyfile"
+    if [ ! -f "$keyfile" ]; then
+        mkdir -p "$(dirname "$keyfile")"
+        if command -v openssl >/dev/null 2>&1; then
+            openssl rand -base64 756 > "$keyfile"
+        else
+            head -c 512 /dev/urandom | base64 > "$keyfile"
+        fi
+        chown 999:999 "$keyfile" 2>/dev/null || true
+        chmod 400 "$keyfile" 2>/dev/null || true
+    fi
+}
+
 execute_local() {
     log_step "Executing '$ACTION' locally on current host [Instance: ${INSTANCE_ID:-database-hub}]..."
 
@@ -482,6 +504,8 @@ execute_local() {
         bash "$PROJECT_ROOT/scripts/tune-host.sh"
         if [ "$ACTION" = "tune-host" ]; then exit 0; fi
     fi
+
+    ensure_mongodb_keyfile
 
     local compose_base
     compose_base=$(build_compose_command "$ENV_FILE")
@@ -700,6 +724,18 @@ main() {
 
     if [ "${INTERACTIVE_MODE:-false}" = true ]; then
         run_interactive
+    fi
+
+    # Auto-derive replica environment if target env file doesn't exist yet but master env is provided
+    if [ "$ACTION" = "deploy-replica" ] && [ -n "$MASTER_ENV" ] && [ -n "$ENV_FILE" ] && [ ! -f "$ENV_FILE" ]; then
+        log_info "Replica env '$ENV_FILE' does not exist. Deriving from Master env '$MASTER_ENV'..."
+        local is_same="true"
+        if [ "$TARGET" = "remote" ] || [ -n "$MASTER_SSH" ]; then is_same="false"; fi
+        local m_host="${MASTER_HOST:-}"
+        if [ -z "$m_host" ]; then
+            m_host=$(detect_primary_ip)
+        fi
+        derive_replica_env "$MASTER_ENV" "$ENV_FILE" "$m_host" "$is_same" 10 "$MAX_RATE"
     fi
 
     load_env_file "$ENV_FILE" "$PROJECT_ROOT" || true

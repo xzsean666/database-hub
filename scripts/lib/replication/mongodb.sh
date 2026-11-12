@@ -21,6 +21,19 @@ mongodb_make_master() {
         return 1
     fi
 
+    # Ensure keyfile exists with proper permissions (user mongodb: 999)
+    local keyfile="$PROJECT_ROOT/configs/mongodb/keys/mongo-keyfile"
+    if [ ! -f "$keyfile" ]; then
+        log_info "Generating cluster shared secret keyfile for MongoDB..."
+        mkdir -p "$(dirname "$keyfile")"
+        openssl rand -base64 756 > "$keyfile"
+        chown 999:999 "$keyfile" 2>/dev/null || true
+        chmod 400 "$keyfile"
+    else
+        chown 999:999 "$keyfile" 2>/dev/null || true
+        chmod 400 "$keyfile"
+    fi
+
     # Check if already initiated
     local rs_check
     rs_check=$(docker exec -i "$container" mongosh -u "$user" -p "$pass" --authenticationDatabase admin --quiet --eval "try { rs.status().ok } catch(e) { 0 }" 2>/dev/null || echo "0")
@@ -53,11 +66,34 @@ mongodb_bootstrap_replica() {
 
     log_step "Registering MongoDB replica node ($slave_host:$slave_port) into Primary..."
 
-    docker exec -i "$master_container" mongosh -u "$master_user" -p "$master_pass" --authenticationDatabase admin --quiet --eval "
-        rs.add({ host: '$slave_host:$slave_port' });
-    " >/dev/null 2>&1 || true
+    local attempts=0
+    local max_attempts=15
+    while [ "$attempts" -lt "$max_attempts" ]; do
+        local res
+        res=$(docker exec -i "$master_container" mongosh -u "$master_user" -p "$master_pass" --authenticationDatabase admin --quiet --eval "
+            try {
+                var status = rs.status();
+                var exists = status.members && status.members.some(function(m) { return m.name === '$slave_host:$slave_port'; });
+                if (exists) {
+                    print('EXISTS');
+                } else {
+                    var r = rs.add({ host: '$slave_host:$slave_port' });
+                    print(r.ok ? 'OK' : 'ERR');
+                }
+            } catch(e) {
+                print('RETRY');
+            }
+        " 2>/dev/null || echo "RETRY")
 
-    log_success "MongoDB replica registered. Initial Sync started automatically."
+        if [[ "$res" == *"OK"* ]] || [[ "$res" == *"EXISTS"* ]]; then
+            log_success "MongoDB replica registered. Initial Sync started automatically."
+            return 0
+        fi
+        sleep 2
+        attempts=$((attempts + 1))
+    done
+
+    log_warn "MongoDB replica node registration may still be pending."
     return 0
 }
 

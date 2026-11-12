@@ -118,7 +118,7 @@ postgres_get_lag() {
 
     if [ "$is_replica" = "t" ]; then
         local lag_seconds
-        lag_seconds=$(docker exec "$container" psql -U "$user" -d "$db" -tAc "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::int, 0);" 2>/dev/null || echo "0")
+        lag_seconds=$(docker exec "$container" psql -U "$user" -d "$db" -tAc "SELECT CASE WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0 ELSE COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::int, 0) END;" 2>/dev/null || echo "0")
         echo "REPLICA|${lag_seconds}s lag"
     elif [ "$is_replica" = "f" ]; then
         local count_replicas
