@@ -1,0 +1,51 @@
+# ==============================================================================
+# MySQL 8.x Performance Tuning Configuration
+# database-hub - High Performance & Production Optimized
+# ==============================================================================
+
+[mysqld]
+# Networking & Connections
+skip-name-resolve
+max_connections = 300
+max_connect_errors = 10000
+connect_timeout = 10
+wait_timeout = 28800
+interactive_timeout = 28800
+back_log = 512
+
+# Character Set & Collation (Full UTF-8 support)
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+
+# Memory / Cache Tuning
+table_open_cache = 4096
+table_definition_cache = 2048
+thread_cache_size = 64
+tmp_table_size = 64M
+max_heap_table_size = 64M
+sort_buffer_size = 4M
+read_buffer_size = 2M
+read_rnd_buffer_size = 4M
+join_buffer_size = 4M
+
+# InnoDB Storage Engine Optimizations
+innodb_buffer_pool_size = 1G
+innodb_buffer_pool_instances = 2
+innodb_file_per_table = 1
+innodb_flush_method = O_DIRECT
+innodb_flush_log_at_trx_commit = 2
+innodb_redo_log_capacity = 512M
+innodb_io_capacity = 2000
+innodb_io_capacity_max = 4000
+innodb_read_io_threads = 4
+innodb_write_io_threads = 4
+innodb_lock_wait_timeout = 50
+
+# Slow Query Logging
+slow_query_log = 1
+slow_query_log_file = /var/lib/mysql/mysql-slow.log
+long_query_time = 1.0
+log_queries_not_using_indexes = 0
+
+[client]
+default-character-set = utf8mb4

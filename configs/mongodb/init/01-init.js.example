@@ -1,0 +1,8 @@
+// Optional MongoDB initialization script
+// Mounted to /docker-entrypoint-initdb.d/
+// Executed on first container start if db directory is empty.
+
+// Example:
+// db = db.getSiblingDB('app_db');
+// db.createCollection('users');
+// db.users.createIndex({ email: 1 }, { unique: true });

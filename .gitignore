@@ -1,0 +1,19 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database data directories
+data/
+*/data/
+
+# Logs
+*.log
+logs/
+
+# OS and Editor files
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/

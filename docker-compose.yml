@@ -1,0 +1,182 @@
+services:
+  # ============================================================================
+  # PostgreSQL (PostgreSQL 16)
+  # High performance relational database with custom memory & SSD optimizations
+  # ============================================================================
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${POSTGRES_CONTAINER_NAME:-database-hub-postgres}
+    profiles: ["postgres", "all"]
+    restart: unless-stopped
+    shm_size: ${POSTGRES_SHM_SIZE:-1g}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_pass}
+      TZ: ${TZ:-UTC}
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
+      - "-c"
+      - "shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}"
+      - "-c"
+      - "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-3GB}"
+      - "-c"
+      - "work_mem=${POSTGRES_WORK_MEM:-16MB}"
+      - "-c"
+      - "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-256MB}"
+      - "-c"
+      - "max_connections=${POSTGRES_MAX_CONNECTIONS:-200}"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - "${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data"
+      - "./configs/postgres/conf.d/01-tuning.conf:/etc/postgresql/postgresql.conf:ro"
+      - "./configs/postgres/init:/docker-entrypoint-initdb.d:ro"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-app_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - database-hub-net
+
+  # ============================================================================
+  # MySQL (MySQL 8.0 / 8.4)
+  # InnoDB optimized with direct I/O, skip DNS resolution, buffer pool sizing
+  # ============================================================================
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0}
+    container_name: ${MYSQL_CONTAINER_NAME:-database-hub-mysql}
+    profiles: ["mysql", "all"]
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-mysql_root_secure_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-app_db}
+      MYSQL_USER: ${MYSQL_USER:-app_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-mysql_user_secure_pass}
+      TZ: ${TZ:-UTC}
+    command:
+      - "--innodb-buffer-pool-size=${MYSQL_BUFFER_POOL_SIZE:-1G}"
+      - "--max-connections=${MYSQL_MAX_CONNECTIONS:-300}"
+      - "--skip-name-resolve"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - "${DATA_DIR:-./data}/mysql:/var/lib/mysql"
+      - "./configs/mysql/conf.d:/etc/mysql/conf.d:ro"
+      - "./configs/mysql/init:/docker-entrypoint-initdb.d:ro"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - database-hub-net
+
+  # ============================================================================
+  # MongoDB (MongoDB 7.0)
+  # Document database optimized with WiredTiger caching & compression
+  # ============================================================================
+  mongodb:
+    image: ${MONGO_IMAGE:-mongo:7.0}
+    container_name: ${MONGO_CONTAINER_NAME:-database-hub-mongodb}
+    profiles: ["mongodb", "all"]
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_secure_pass}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-app_db}
+      TZ: ${TZ:-UTC}
+    command:
+      - "mongod"
+      - "--config"
+      - "/etc/mongod.conf"
+      - "--wiredTigerCacheSizeGB"
+      - "${MONGO_CACHE_SIZE_GB:-2}"
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - "${DATA_DIR:-./data}/mongodb:/data/db"
+      - "./configs/mongodb/mongod.conf:/etc/mongod.conf:ro"
+      - "./configs/mongodb/init:/docker-entrypoint-initdb.d:ro"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand({ping:1})\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - database-hub-net
+
+  # ============================================================================
+  # Redis (Redis 7.2)
+  # In-memory data store with multithreaded I/O, AOF persistence & LRU eviction
+  # ============================================================================
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.2-alpine}
+    container_name: ${REDIS_CONTAINER_NAME:-database-hub-redis}
+    profiles: ["redis", "all"]
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_secure_pass}
+      TZ: ${TZ:-UTC}
+    command:
+      - "sh"
+      - "-c"
+      - >
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server /usr/local/etc/redis/redis.conf --requirepass "$$REDIS_PASSWORD" --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}";
+        else
+          exec redis-server /usr/local/etc/redis/redis.conf --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}";
+        fi
+    ports:
+      - "${BIND_IP:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - "${DATA_DIR:-./data}/redis:/data"
+      - "./configs/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
+    sysctls:
+      net.core.somaxconn: 1024
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG; else redis-cli ping | grep -q PONG; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - database-hub-net
+
+networks:
+  database-hub-net:
+    name: ${DOCKER_NETWORK_NAME:-database-hub-net}
+    driver: bridge

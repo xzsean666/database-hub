@@ -1,0 +1,7 @@
+-- Optional initialization script for PostgreSQL
+-- Mounted to /docker-entrypoint-initdb.d/
+-- Files ending in .sql or .sh are executed in alphabetical order on first database creation.
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";

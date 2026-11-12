@@ -1,0 +1,5 @@
+-- Optional MySQL initialization script
+-- Mounted to /docker-entrypoint-initdb.d/
+-- Executed on initial container setup if the data directory is empty.
+
+-- Example: CREATE DATABASE IF NOT EXISTS `analytics_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
