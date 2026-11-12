@@ -27,6 +27,13 @@ database-hub/
 ├── deploy.sh                     # Unified deployment CLI (Local & Remote SSH)
 ├── docker-compose.yml            # Docker Compose specification with modular profiles
 ├── .env.example                  # Comprehensive environment & tuning configuration
+├── envs/                         # Database-specific environment templates (dev & prod)
+│   ├── README.md                 # Detailed examples and deployment commands
+│   ├── postgres/                 # dev.env.example & prod-high-perf.env.example
+│   ├── mysql/                    # dev.env.example & prod-high-perf.env.example
+│   ├── mongodb/                  # dev.env.example & prod-high-perf.env.example
+│   ├── redis/                    # cache-lru.env.example & persistent.env.example
+│   └── all/                      # all-in-one stack env examples
 ├── configs/                      # Database configuration templates & init scripts
 │   ├── postgres/
 │   │   ├── conf.d/01-tuning.conf # PostgreSQL performance optimizations
@@ -52,10 +59,17 @@ database-hub/
 
 ### 1. Configure Environment
 
-Copy `.env.example` to `.env` and adjust passwords, ports, or memory limits as needed:
+You can copy the root `.env.example` or choose a dedicated template from the `envs/` folder:
 
 ```bash
+# Option A: Universal configuration
 cp .env.example .env
+
+# Option B: Dedicated database templates (from envs/)
+cp envs/postgres/prod-high-perf.env.example envs/postgres/prod.env
+cp envs/redis/cache-lru.env.example envs/redis/cache.env
+cp envs/mysql/prod-high-perf.env.example envs/mysql/prod.env
+cp envs/mongodb/prod-high-perf.env.example envs/mongodb/prod.env
 ```
 
 ### 2. Remote Deployment (via SSH)

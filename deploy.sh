@@ -281,6 +281,9 @@ validate_env_file() {
         exit 1
     fi
 
+    # Convert to absolute path
+    ENV_FILE="$(cd "$(dirname "$ENV_FILE")" && pwd)/$(basename "$ENV_FILE")"
+
     echo -e "${GREEN}✓ Using environment file: $ENV_FILE${NC}"
 }
 

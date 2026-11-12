@@ -1,11 +1,22 @@
-# Environment files
+# Environment files & Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
+envs/**/*.env
+envs/**/.env*
+envs/**/local.env
+envs/**/prod.env
+envs/**/dev.env
+
+# Explicitly track all example files
+!**/*.example
+!.env.example
+!envs/**/*.example
 
 # Database data directories
 data/
 */data/
+test_data/
 
 # Logs
 *.log
