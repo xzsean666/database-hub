@@ -38,7 +38,7 @@ services:
       - "-c"
       - "effective_io_concurrency=200"
     ports:
-      - "${BIND_IP:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_IP:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - "${POSTGRES_DATA_DIR:-/app/database/postgres/${POSTGRES_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-postgres}}:/var/lib/postgresql/data"
       - "./configs/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro"
@@ -82,7 +82,7 @@ services:
       - "--character-set-server=utf8mb4"
       - "--collation-server=utf8mb4_unicode_ci"
     ports:
-      - "${BIND_IP:-0.0.0.0}:${MYSQL_PORT:-3306}:3306"
+      - "${BIND_IP:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     volumes:
       - "${MYSQL_DATA_DIR:-/app/database/mysql/${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}}:/var/lib/mysql"
       - "./configs/mysql/conf.d:/etc/mysql/conf.d:ro"
@@ -92,7 +92,7 @@ services:
         soft: 65536
         hard: 65536
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$${MYSQL_ROOT_PASSWORD}\" mysqladmin ping -h localhost -u root"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -117,17 +117,19 @@ services:
       MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-app_db}
       TZ: ${TZ:-UTC}
     command:
-      - "mongod"
-      - "--config"
-      - "/etc/mongod.conf"
-      - "--wiredTigerCacheSizeGB"
-      - "${MONGO_CACHE_SIZE_GB:-2}"
-      - "--replSetName"
-      - "${MONGO_REPL_SET_NAME:-rs0}"
-      - "--keyFile"
-      - "/etc/mongodb/keys/mongo-keyfile"
+      - "sh"
+      - "-c"
+      - >
+        EXTRA_ARGS="";
+        if [ -f /etc/mongodb/keys/mongo-keyfile ]; then
+          chmod 400 /etc/mongodb/keys/mongo-keyfile 2>/dev/null || true;
+          EXTRA_ARGS="--keyFile /etc/mongodb/keys/mongo-keyfile --replSetName $${MONGO_REPL_SET_NAME:-rs0}";
+        elif [ "$${MONGO_ROLE:-standalone}" = "replica" ]; then
+          EXTRA_ARGS="--replSetName $${MONGO_REPL_SET_NAME:-rs0}";
+        fi;
+        exec mongod --config /etc/mongod.conf --wiredTigerCacheSizeGB "$${MONGO_CACHE_SIZE_GB:-2}" $$EXTRA_ARGS
     ports:
-      - "${BIND_IP:-0.0.0.0}:${MONGO_PORT:-27017}:27017"
+      - "${BIND_IP:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
     volumes:
       - "${MONGO_DATA_DIR:-/app/database/mongodb/${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}}:/data/db"
       - "./configs/mongodb/mongod.conf:/etc/mongod.conf:ro"
@@ -141,7 +143,7 @@ services:
         soft: 65536
         hard: 65536
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand({ping:1})\" || exit 1"]
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand({ping:1})\" 2>/dev/null || mongosh -u \"$${MONGO_INITDB_ROOT_USERNAME:-root}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --quiet --eval \"db.adminCommand({ping:1})\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -180,7 +182,7 @@ services:
           exec redis-server /usr/local/etc/redis/redis.conf --maxmemory "$${REDIS_MAX_MEMORY:-1gb}" --maxmemory-policy "$${REDIS_MAXMEMORY_POLICY:-allkeys-lru}" $$EXTRA_FLAGS;
         fi
     ports:
-      - "${BIND_IP:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
+      - "${BIND_IP:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - "${REDIS_DATA_DIR:-/app/database/redis/${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}}:/data"
       - "./configs/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
@@ -191,7 +193,7 @@ services:
         soft: 65536
         hard: 65536
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG; else redis-cli ping | grep -q PONG; fi"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5

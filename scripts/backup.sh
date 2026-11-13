@@ -72,7 +72,7 @@ backup_postgres() {
     local start_time
     start_time=$(date +%s)
 
-    if docker exec "$container" pg_dump -U "$user" -d "$db" --clean --if-exists --create | $compressor > "$outfile"; then
+    if docker exec -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" pg_dump -U "$user" -d "$db" --clean --if-exists --create | $compressor > "$outfile"; then
         if [ -s "$outfile" ]; then
             sha256sum "$outfile" | awk '{print $1}' > "${outfile}.sha256"
             local end_time
@@ -117,7 +117,7 @@ backup_mysql() {
     local start_time
     start_time=$(date +%s)
 
-    if docker exec "$container" mysqldump -u root -p"$root_pass" \
+    if docker exec -e MYSQL_PWD="$root_pass" "$container" mysqldump -u root \
         --databases "$db" \
         --single-transaction \
         --quick \
@@ -215,17 +215,38 @@ backup_redis() {
     ext=$(get_archive_extension "$compressor")
     local outfile="$BACKUP_DIR/redis_${inst_id}_${timestamp}.tar.${ext}"
 
-    log_info "Triggering Redis [$inst_id] (port $port) BGSAVE and archiving..."
+    local redis_cli_base=(docker exec)
+    if [ -n "$pass" ]; then
+        redis_cli_base+=(-e "REDISCLI_AUTH=$pass")
+    fi
+    redis_cli_base+=("$container" redis-cli)
+
+    log_info "Triggering Redis [$inst_id] (port $port) BGSAVE and awaiting completion..."
     local start_time
     start_time=$(date +%s)
 
-    if [ -n "$pass" ]; then
-        docker exec "$container" redis-cli -a "$pass" bgsave 2>/dev/null || true
-    else
-        docker exec "$container" redis-cli bgsave 2>/dev/null || true
-    fi
+    local bgsave_out
+    bgsave_out=$("${redis_cli_base[@]}" bgsave 2>&1 || true)
+    log_info "Redis bgsave response: $bgsave_out"
 
-    sleep 2
+    # Wait for bgsave to finish (poll up to 60 seconds)
+    local wait_sec=0
+    while [ "$wait_sec" -lt 60 ]; do
+        local in_progress
+        in_progress=$("${redis_cli_base[@]}" info persistence 2>/dev/null | grep -E '^rdb_bgsave_in_progress:' | cut -d':' -f2 | tr -d '\r' || echo "0")
+        if [ "$in_progress" = "0" ]; then
+            break
+        fi
+        sleep 1
+        wait_sec=$((wait_sec + 1))
+    done
+
+    local last_status
+    last_status=$("${redis_cli_base[@]}" info persistence 2>/dev/null | grep -E '^rdb_last_bgsave_status:' | cut -d':' -f2 | tr -d '\r' || echo "ok")
+    if [ "$last_status" != "ok" ]; then
+        log_error "Redis bgsave reported non-ok status: $last_status"
+        return 1
+    fi
 
     if docker exec "$container" tar -cf - -C /data . 2>/dev/null | $compressor > "$outfile"; then
         if [ -s "$outfile" ]; then
@@ -261,10 +282,23 @@ prune_backups() {
 
     for prefix in "${db_prefixes[@]}"; do
         local files=()
-        # Find matching backup files for this specific INSTANCE_ID
+        # Find matching backup files strictly for this specific INSTANCE_ID
         while IFS= read -r file; do
             [ -n "$file" ] && files+=("$file")
-        done < <(find "$BACKUP_DIR" -maxdepth 1 -type f \( -name "${prefix}_${inst_id}_*" -o -name "${prefix}_*" \) ! -name "*.sha256" | sort -r)
+        done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${prefix}_${inst_id}_*" ! -name "*.sha256" | sort -r)
+
+        # Fallback only if inst_id is "database-hub" (legacy files without inst_id in name)
+        if [ "$inst_id" = "database-hub" ]; then
+            while IFS= read -r file; do
+                if [ -n "$file" ]; then
+                    local bname
+                    bname=$(basename "$file")
+                    if [[ "$bname" =~ ^${prefix}_[0-9]{8}_[0-9]{6}\. ]]; then
+                        files+=("$file")
+                    fi
+                fi
+            done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${prefix}_*" ! -name "*.sha256" | sort -r)
+        fi
 
         local count=${#files[@]}
         if [ "$count" -gt "$max_keep" ]; then
@@ -410,13 +444,19 @@ main() {
             ts=$(date "+%Y-%m-%d %H:%M:%S")
             echo "--- Backup Run Started at $ts [Instance: ${INSTANCE_ID:-database-hub}] ---"
 
-            backup_postgres || true
-            backup_mysql || true
-            backup_mongodb || true
-            backup_redis || true
+            local fail_count=0
+            backup_postgres || ((fail_count++))
+            backup_mysql || ((fail_count++))
+            backup_mongodb || ((fail_count++))
+            backup_redis || ((fail_count++))
 
             prune_backups "$AUTO_BACKUP_RETENTION"
-            log_success "Automated backup run completed for [${INSTANCE_ID:-database-hub}]."
+            if [ "$fail_count" -gt 0 ]; then
+                log_error "Automated backup run completed with $fail_count failure(s) for [${INSTANCE_ID:-database-hub}]."
+                exit 1
+            else
+                log_success "Automated backup run completed successfully for [${INSTANCE_ID:-database-hub}]."
+            fi
             ;;
         run)
             local target="${sub_arg:-all}"

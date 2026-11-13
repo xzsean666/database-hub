@@ -232,6 +232,30 @@ fetch_backups() {
     fi
 }
 
+# Verify SHA256 integrity checksum
+verify_checksum() {
+    local file_path="$1"
+    local sha_file="${file_path}.sha256"
+    if [ -f "$sha_file" ]; then
+        log_info "Verifying SHA256 integrity checksum for $(basename "$file_path")..."
+        local expected_sha
+        expected_sha=$(awk '{print $1}' "$sha_file")
+        local actual_sha
+        actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+        if [ "$expected_sha" != "$actual_sha" ]; then
+            log_error "SHA256 checksum mismatch for $file_path!"
+            log_error "  Expected: $expected_sha"
+            log_error "  Actual:   $actual_sha"
+            log_error "The backup archive may be corrupted. Aborting restore for safety."
+            return 1
+        fi
+        log_success "SHA256 integrity verified: $actual_sha [OK]"
+    else
+        log_warn "No .sha256 checksum file found for $(basename "$file_path"). Proceeding without verification."
+    fi
+    return 0
+}
+
 # Perform local restore of database
 execute_restore_local() {
     local db_type="$1"
@@ -239,6 +263,8 @@ execute_restore_local() {
     local fname
     fname=$(basename "$file_path")
     local inst_id="${INSTANCE_ID:-database-hub}"
+
+    verify_checksum "$file_path" || return 1
 
     log_step "Restoring $db_type [$inst_id] from local file: $fname"
 
@@ -252,11 +278,12 @@ execute_restore_local() {
             local db="${POSTGRES_DB:-app_db}"
 
             log_info "Streaming decompression ($decompressor) into PostgreSQL container '$container'..."
-            if $decompressor "$file_path" | docker exec -i "$container" psql -U "$user" -d "$db" > /dev/null 2>&1; then
+            # Connect to maintenance db 'postgres' since dump includes --create
+            if $decompressor "$file_path" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d postgres > /dev/null 2>&1; then
                 log_success "PostgreSQL ($db) successfully restored!"
             else
-                log_warn "Standard psql restore returned non-zero. Retrying against maintenance db 'postgres'..."
-                $decompressor "$file_path" | docker exec -i "$container" psql -U "$user" -d postgres
+                log_warn "psql against 'postgres' maintenance db returned non-zero. Attempting fallback to '$db'..."
+                $decompressor "$file_path" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d "$db"
                 log_success "PostgreSQL successfully restored!"
             fi
             ;;
@@ -266,7 +293,7 @@ execute_restore_local() {
             local db="${MYSQL_DATABASE:-app_db}"
 
             log_info "Streaming decompression ($decompressor) into MySQL container '$container'..."
-            $decompressor "$file_path" | docker exec -i "$container" mysql -u root -p"$root_pass"
+            $decompressor "$file_path" | docker exec -i -e MYSQL_PWD="$root_pass" "$container" mysql -u root
             log_success "MySQL ($db) successfully restored!"
             ;;
         mongodb)
@@ -294,7 +321,13 @@ execute_restore_local() {
 
             log_info "Restoring Redis RDB snapshot into $data_dir..."
             mkdir -p "$data_dir"
+            # Remove stale AOF/RDB files so restored snapshot takes effect cleanly
+            rm -f "$data_dir"/appendonly* "$data_dir"/dump.rdb 2>/dev/null || true
             $decompressor "$file_path" | tar -xf - -C "$data_dir"
+
+            # Ensure container user (redis: 999) has correct ownership and permissions
+            chown -R 999:999 "$data_dir" 2>/dev/null || true
+            chmod -R u+rw "$data_dir" 2>/dev/null || true
 
             log_info "Restarting Redis container '$container'..."
             docker start "$container" >/dev/null
@@ -311,6 +344,7 @@ execute_restore_local() {
 execute_restore_remote() {
     local db_type="$1"
     local file_path="$2"
+    local remote_env="${3:-.env}"
     local fname
     fname=$(basename "$file_path")
     local inst_id="${INSTANCE_ID:-database-hub}"
@@ -322,12 +356,26 @@ execute_restore_remote() {
     local remote_cmd='
         set -euo pipefail
         cd "'"$REMOTE_DIR"'"
-        if [ -f .env ]; then
+        if [ -f "'"$remote_env"'" ]; then
+            set -a; source "'"$remote_env"'"; set +a
+        elif [ -f .env ]; then
             set -a; source .env; set +a
         fi
 
         file="'"$file_path"'"
         fname=$(basename "$file")
+        sha_file="${file}.sha256"
+        if [ -f "$sha_file" ]; then
+            echo "[INFO] Verifying SHA256 integrity checksum for $fname on remote..."
+            expected_sha=$(awk "{print \$1}" "$sha_file")
+            actual_sha=$(sha256sum "$file" | awk "{print \$1}")
+            if [ "$expected_sha" != "$actual_sha" ]; then
+                echo "[ERROR] SHA256 checksum mismatch on remote! Aborting restore."
+                exit 1
+            fi
+            echo "[SUCCESS] SHA256 checksum verified [OK]"
+        fi
+
         inst_id="${INSTANCE_ID:-database-hub}"
         
         # Decompressor detection
@@ -344,10 +392,10 @@ execute_restore_remote() {
                 user="${POSTGRES_USER:-postgres}"
                 db="${POSTGRES_DB:-app_db}"
                 echo "[INFO] Streaming decompression into PostgreSQL container '\''$container'\''..."
-                if $DECOMP "$file" | docker exec -i "$container" psql -U "$user" -d "$db" > /dev/null 2>&1; then
+                if $DECOMP "$file" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d postgres > /dev/null 2>&1; then
                     echo "[SUCCESS] PostgreSQL restored successfully."
                 else
-                    $DECOMP "$file" | docker exec -i "$container" psql -U "$user" -d postgres
+                    $DECOMP "$file" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d "$db"
                     echo "[SUCCESS] PostgreSQL restored successfully."
                 fi
                 ;;
@@ -355,7 +403,7 @@ execute_restore_remote() {
                 container="${MYSQL_CONTAINER_NAME:-${inst_id}-mysql}"
                 root_pass="${MYSQL_ROOT_PASSWORD:-mysql_root_secure_pass}"
                 echo "[INFO] Streaming decompression into MySQL container '\''$container'\''..."
-                $DECOMP "$file" | docker exec -i "$container" mysql -u root -p"$root_pass"
+                $DECOMP "$file" | docker exec -i -e MYSQL_PWD="$root_pass" "$container" mysql -u root
                 echo "[SUCCESS] MySQL restored successfully."
                 ;;
             mongodb)
@@ -380,7 +428,10 @@ execute_restore_remote() {
                 docker stop "$container" >/dev/null
                 echo "[INFO] Restoring Redis data into $data_dir..."
                 mkdir -p "$data_dir"
+                rm -f "$data_dir"/appendonly* "$data_dir"/dump.rdb 2>/dev/null || true
                 $DECOMP "$file" | tar -xf - -C "$data_dir"
+                chown -R 999:999 "$data_dir" 2>/dev/null || true
+                chmod -R u+rw "$data_dir" 2>/dev/null || true
                 docker start "$container" >/dev/null
                 echo "[SUCCESS] Redis restored successfully."
                 ;;
@@ -532,16 +583,22 @@ main() {
     local start_ts
     start_ts=$(date +%s)
 
+    local remote_env_rel="${ENV_FILE:-.env}"
+    if [[ "$remote_env_rel" = /* ]]; then
+        remote_env_rel="${remote_env_rel#$PROJECT_ROOT/}"
+    fi
+    remote_env_rel="${remote_env_rel#./}"
+
     if [ "$TARGET" = "local" ]; then
         execute_restore_local "$t_db" "$t_path"
         echo ""
         log_step "Running health verification..."
         bash "$PROJECT_ROOT/scripts/healthcheck.sh" "$ENV_FILE" || true
     else
-        execute_restore_remote "$t_db" "$t_path"
+        execute_restore_remote "$t_db" "$t_path" "$remote_env_rel"
         echo ""
         log_step "Running remote health verification..."
-        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh .env" || true
+        run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/healthcheck.sh '$remote_env_rel'" || true
     fi
 
     local end_ts

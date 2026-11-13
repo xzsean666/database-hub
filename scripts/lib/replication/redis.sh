@@ -20,8 +20,8 @@ redis_make_master() {
 
     # Ensure container is operating as master (remove any existing replicaof if present)
     if [ -n "$pass" ]; then
-        docker exec -i "$container" redis-cli -a "$pass" REPLICAOF NO ONE >/dev/null 2>&1 || true
-        docker exec -i "$container" redis-cli -a "$pass" CONFIG SET masterauth "$pass" >/dev/null 2>&1 || true
+        docker exec -i -e REDISCLI_AUTH="$pass" "$container" redis-cli REPLICAOF NO ONE >/dev/null 2>&1 || true
+        docker exec -i -e REDISCLI_AUTH="$pass" "$container" redis-cli CONFIG SET masterauth "$pass" >/dev/null 2>&1 || true
     else
         docker exec -i "$container" redis-cli REPLICAOF NO ONE >/dev/null 2>&1 || true
     fi
@@ -44,9 +44,9 @@ redis_bootstrap_replica() {
     while [ "$attempts" -lt "$max_attempts" ]; do
         if [ -n "$replica_pass" ]; then
             if [ -n "$master_pass" ]; then
-                docker exec -i "$replica_container" redis-cli -a "$replica_pass" CONFIG SET masterauth "$master_pass" >/dev/null 2>&1 || true
+                docker exec -i -e REDISCLI_AUTH="$replica_pass" "$replica_container" redis-cli CONFIG SET masterauth "$master_pass" >/dev/null 2>&1 || true
             fi
-            if docker exec -i "$replica_container" redis-cli -a "$replica_pass" REPLICAOF "$master_host" "$master_port" >/dev/null 2>&1; then
+            if docker exec -i -e REDISCLI_AUTH="$replica_pass" "$replica_container" redis-cli REPLICAOF "$master_host" "$master_port" >/dev/null 2>&1; then
                 log_success "Redis replica successfully linked to Master."
                 return 0
             fi
@@ -78,7 +78,7 @@ redis_get_lag() {
 
     local info_repl
     if [ -n "$pass" ]; then
-        info_repl=$(docker exec "$container" redis-cli -a "$pass" info replication 2>/dev/null || true)
+        info_repl=$(docker exec -e REDISCLI_AUTH="$pass" "$container" redis-cli info replication 2>/dev/null || true)
     else
         info_repl=$(docker exec "$container" redis-cli info replication 2>/dev/null || true)
     fi

@@ -40,7 +40,7 @@ fi
 MYSQL_NAME="${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}"
 if docker ps --format '{{.Names}}' | grep -q "^${MYSQL_NAME}$"; then
     echo -n "Checking MySQL (${MYSQL_NAME})... "
-    if docker exec "$MYSQL_NAME" mysqladmin ping -h localhost -u root -p"${MYSQL_ROOT_PASSWORD:-mysql_root_secure_pass}" > /dev/null 2>&1; then
+    if docker exec -e MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-mysql_root_secure_pass}" "$MYSQL_NAME" mysqladmin ping -h localhost -u root > /dev/null 2>&1; then
         echo -e "${GREEN}[OK] Running & Responsive${NC}"
     else
         echo -e "${YELLOW}[PENDING] Container running but initializing${NC}"
@@ -51,7 +51,8 @@ fi
 MONGO_NAME="${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}"
 if docker ps --format '{{.Names}}' | grep -q "^${MONGO_NAME}$"; then
     echo -n "Checking MongoDB (${MONGO_NAME})... "
-    if docker exec "$MONGO_NAME" mongosh --quiet --eval "db.adminCommand({ping:1})" > /dev/null 2>&1; then
+    if docker exec "$MONGO_NAME" mongosh --quiet --eval "db.adminCommand({ping:1})" > /dev/null 2>&1 || \
+       docker exec "$MONGO_NAME" mongosh -u "${MONGO_INITDB_ROOT_USERNAME:-root}" -p "${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_secure_pass}" --authenticationDatabase admin --quiet --eval "db.adminCommand({ping:1})" > /dev/null 2>&1; then
         echo -e "${GREEN}[OK] Running & Responsive${NC}"
     else
         echo -e "${YELLOW}[PENDING] Container running but initializing${NC}"
@@ -62,11 +63,7 @@ fi
 REDIS_NAME="${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}"
 if docker ps --format '{{.Names}}' | grep -q "^${REDIS_NAME}$"; then
     echo -n "Checking Redis (${REDIS_NAME})... "
-    if [ -n "${REDIS_PASSWORD:-}" ]; then
-        REDIS_RES=$(docker exec "$REDIS_NAME" redis-cli -a "$REDIS_PASSWORD" ping 2>/dev/null || true)
-    else
-        REDIS_RES=$(docker exec "$REDIS_NAME" redis-cli ping 2>/dev/null || true)
-    fi
+    REDIS_RES=$(docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" "$REDIS_NAME" redis-cli ping 2>/dev/null || true)
     if [[ "$REDIS_RES" == *"PONG"* ]]; then
         echo -e "${GREEN}[OK] Running & Responsive${NC}"
     else
@@ -75,4 +72,9 @@ if docker ps --format '{{.Names}}' | grep -q "^${REDIS_NAME}$"; then
 fi
 
 echo -e "\n${BLUE}Container Overview:${NC}"
-docker compose ps
+proj_name="${COMPOSE_PROJECT_NAME:-${INSTANCE_ID:-database-hub}}"
+if [ -f "$ENV_FILE" ]; then
+    docker compose -p "$proj_name" --env-file "$ENV_FILE" ps 2>/dev/null || docker compose ps
+else
+    docker compose -p "$proj_name" ps 2>/dev/null || docker compose ps
+fi

@@ -60,6 +60,28 @@ if [ -d "/sys/kernel/mm/transparent_hugepage" ]; then
         echo never | $SUDO tee /sys/kernel/mm/transparent_hugepage/defrag > /dev/null 2>&1 || true
     fi
     echo -e "${GREEN}✓ Disabled Transparent Huge Pages (THP)${NC}"
+
+    # Persist THP disabling across reboots via systemd service
+    if command -v systemctl >/dev/null 2>&1 && [ -d "/etc/systemd/system" ]; then
+        THP_SERVICE="/etc/systemd/system/disable-thp.service"
+        $SUDO tee "$THP_SERVICE" > /dev/null << 'EOF'
+[Unit]
+Description=Disable Transparent Huge Pages (THP) for Database Hub
+DefaultDependencies=no
+After=sysinit.target local-fs.target
+Before=mongod.service redis-server.service docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true; echo never > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true'
+
+[Install]
+WantedBy=basic.target
+EOF
+        $SUDO systemctl daemon-reload >/dev/null 2>&1 || true
+        $SUDO systemctl enable disable-thp.service >/dev/null 2>&1 || true
+        echo -e "${GREEN}✓ Installed persistent THP disable service (disable-thp.service)${NC}"
+    fi
 fi
 
 echo -e "${GREEN}Host optimization completed successfully!${NC}"

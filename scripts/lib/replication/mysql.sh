@@ -23,7 +23,7 @@ mysql_make_master() {
     repl_pass=$(generate_random_secret 24)
 
     log_info "Creating replication user '$repl_user' in MySQL..."
-    docker exec -i "$container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF || true
+    docker exec -i -e MYSQL_PWD="$root_pass" "$container" mysql -u root >/dev/null 2>&1 << EOF || true
 CREATE USER IF NOT EXISTS '${repl_user}'@'%' IDENTIFIED BY '${repl_pass}';
 ALTER USER '${repl_user}'@'%' IDENTIFIED BY '${repl_pass}';
 GRANT REPLICATION SLAVE, REPLICATION CLIENT, BACKUP_ADMIN ON *.* TO '${repl_user}'@'%';
@@ -50,7 +50,7 @@ mysql_bootstrap_replica() {
     local attempts=0
     local max_attempts=30
     while [ "$attempts" -lt "$max_attempts" ]; do
-        if docker exec -i "$replica_container" mysql -u root -p"$root_pass" >/dev/null 2>&1 << EOF
+        if docker exec -i -e MYSQL_PWD="$root_pass" "$replica_container" mysql -u root >/dev/null 2>&1 << EOF
 STOP REPLICA;
 CHANGE REPLICATION SOURCE TO
   SOURCE_HOST='${master_host}',
@@ -85,7 +85,7 @@ mysql_get_lag() {
     fi
 
     local repl_status
-    repl_status=$(docker exec "$container" mysql -u root -p"$root_pass" -e "SHOW REPLICA STATUS\G" 2>/dev/null || docker exec "$container" mysql -u root -p"$root_pass" -e "SHOW SLAVE STATUS\G" 2>/dev/null || true)
+    repl_status=$(docker exec -e MYSQL_PWD="$root_pass" "$container" mysql -u root -e "SHOW REPLICA STATUS\G" 2>/dev/null || docker exec -e MYSQL_PWD="$root_pass" "$container" mysql -u root -e "SHOW SLAVE STATUS\G" 2>/dev/null || true)
 
     if [ -n "$repl_status" ]; then
         local io_run sql_run sec_behind
@@ -95,7 +95,7 @@ mysql_get_lag() {
         echo "REPLICA|IO:$io_run SQL:$sql_run ${sec_behind}s lag"
     else
         local repl_count
-        repl_count=$(docker exec "$container" mysql -u root -p"$root_pass" -e "SHOW REPLICAS;" 2>/dev/null | wc -l || true)
+        repl_count=$(docker exec -e MYSQL_PWD="$root_pass" "$container" mysql -u root -e "SHOW REPLICAS;" 2>/dev/null | wc -l || true)
         local count=$((repl_count > 1 ? repl_count - 1 : 0))
         echo "MASTER|${count} active replicas"
     fi

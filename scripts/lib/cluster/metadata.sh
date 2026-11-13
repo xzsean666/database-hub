@@ -66,15 +66,15 @@ read_json_val() {
         python3 -c "
 import sys, json
 try:
-    d = json.loads('''$json_str''')
-    keys = '$key'.replace('//', '').lstrip('.').split('.')
+    d = json.load(sys.stdin)
+    keys = sys.argv[1].replace('//', '').lstrip('.').split('.')
     v = d
     for k in keys:
         if k: v = v.get(k, '')
     print(v if v is not None else '')
 except Exception:
     pass
-" 2>/dev/null || true
+" "$key" <<< "$json_str" 2>/dev/null || true
     else
         # Fallback simple grep for flat key
         local clean_key="${key##*.}"

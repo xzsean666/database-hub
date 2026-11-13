@@ -25,7 +25,7 @@ postgres_make_master() {
     repl_pass=$(generate_random_secret 24)
 
     log_info "Creating replication role '$repl_user' in PostgreSQL..."
-    docker exec -i "$container" psql -U "$user" -d "$db" >/dev/null 2>&1 << EOF
+    docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d "$db" >/dev/null 2>&1 << EOF
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$repl_user') THEN
@@ -38,18 +38,19 @@ END
 EOF
 
     # 2. Update pg_hba.conf to allow replication connections
-    log_info "Configuring pg_hba.conf replication authorization..."
+    local repl_cidr="${REPLICA_ALLOWED_CIDR:-0.0.0.0/0}"
+    log_info "Configuring pg_hba.conf replication authorization for CIDR: $repl_cidr..."
     docker exec -i "$container" sh -c "
         PGDATA=\"/var/lib/postgresql/data\"
         if ! grep -q \"$repl_user\" \"\$PGDATA/pg_hba.conf\" 2>/dev/null; then
-            echo \"host replication $repl_user 0.0.0.0/0 scram-sha-256\" >> \"\$PGDATA/pg_hba.conf\"
-            echo \"host replication $repl_user 0.0.0.0/0 md5\" >> \"\$PGDATA/pg_hba.conf\"
+            echo \"host replication $repl_user $repl_cidr scram-sha-256\" >> \"\$PGDATA/pg_hba.conf\"
+            echo \"host replication $repl_user $repl_cidr md5\" >> \"\$PGDATA/pg_hba.conf\"
         fi
     "
 
     # 3. Reload configuration without downtime
     log_info "Reloading PostgreSQL configuration..."
-    docker exec -i "$container" psql -U "$user" -d "$db" -c "SELECT pg_reload_conf();" >/dev/null 2>&1
+    docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d "$db" -c "SELECT pg_reload_conf();" >/dev/null 2>&1
 
     log_success "PostgreSQL [$inst_id] is now operating as Master (User: $repl_user, Port: $port)."
     echo "REPL_USER=$repl_user"

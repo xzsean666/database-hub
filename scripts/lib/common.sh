@@ -124,6 +124,13 @@ resolve_single_db_dir() {
     local specific_dir="${3:-}"
     local global_dir="${4:-}"
 
+    local base_storage="/app/database"
+    if [ ! -d "/app/database" ] && [ ! -w "/" ] && [ ! -w "/app" ]; then
+        base_storage="${PROJECT_ROOT:-$(pwd)}/data"
+    elif [ -d "/app/database" ] && [ ! -w "/app/database" ]; then
+        base_storage="${PROJECT_ROOT:-$(pwd)}/data"
+    fi
+
     if [ -n "$specific_dir" ]; then
         if [[ "$specific_dir" =~ ^/ ]]; then
             echo "$specific_dir"
@@ -134,10 +141,10 @@ resolve_single_db_dir() {
             if [ -z "$sub" ] || [ "$sub" = "data" ]; then
                 sub="$container_name"
             fi
-            echo "/app/database/$db_type/$sub"
+            echo "$base_storage/$db_type/$sub"
             return 0
         else
-            echo "/app/database/$db_type/$specific_dir"
+            echo "$base_storage/$db_type/$specific_dir"
             return 0
         fi
     fi
@@ -160,15 +167,15 @@ resolve_single_db_dir() {
             if [ -z "$sub" ]; then
                 sub="$container_name"
             fi
-            echo "/app/database/$db_type/$sub"
+            echo "$base_storage/$db_type/$sub"
             return 0
         else
-            echo "/app/database/$db_type/$global_dir"
+            echo "$base_storage/$db_type/$global_dir"
             return 0
         fi
     fi
 
-    echo "/app/database/$db_type/$container_name"
+    echo "$base_storage/$db_type/$container_name"
 }
 
 resolve_database_data_dirs() {

@@ -110,11 +110,11 @@ Wants=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=$project_dir
+WorkingDirectory="$project_dir"
 Environment=AUTO_BACKUP_RETENTION=$retention
 Environment=INSTANCE_ID=$inst_id
 Environment=ENV_FILE=$env_path
-ExecStart=/usr/bin/env bash $backup_script run-all --env $env_path
+ExecStart=/usr/bin/env bash "$backup_script" run-all --env "$env_path"
 StandardOutput=append:$log_file
 StandardError=append:$log_file
 
@@ -156,14 +156,14 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 AUTO_BACKUP_RETENTION=$retention
 INSTANCE_ID=$inst_id
-$SCHEDULE_CRON root cd $project_dir && bash $backup_script run-all --env $env_path >> $log_file 2>&1
+$SCHEDULE_CRON root cd "$project_dir" && bash "$backup_script" run-all --env "$env_path" >> "$log_file" 2>&1
 EOF
         $SUDO chmod 644 "$cron_d_file"
         echo -e "\033[0;32m[SUCCESS]\033[0m Cron auto-backup scheduled in $cron_d_file! ($SCHEDULE_LABEL)"
         return 0
     else
         local marker="DATABASE_HUB_BACKUP_${inst_id}"
-        local cron_line="$SCHEDULE_CRON cd $project_dir && AUTO_BACKUP_RETENTION=$retention INSTANCE_ID=$inst_id bash $backup_script run-all --env $env_path >> $log_file 2>&1 # $marker"
+        local cron_line="$SCHEDULE_CRON cd \"$project_dir\" && AUTO_BACKUP_RETENTION=$retention INSTANCE_ID=$inst_id bash \"$backup_script\" run-all --env \"$env_path\" >> \"$log_file\" 2>&1 # $marker"
         (crontab -l 2>/dev/null | grep -v "$marker" || true; echo "$cron_line") | crontab -
         echo -e "\033[0;32m[SUCCESS]\033[0m Crontab auto-backup scheduled for '${inst_id}'! ($SCHEDULE_LABEL)"
         return 0
