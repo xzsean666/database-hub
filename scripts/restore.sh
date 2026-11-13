@@ -29,7 +29,7 @@ show_help() {
     echo -e "${BOLD}Database Hub - Universal Database Restore Tool${NC}
 
 Usage:
-  ./restore.sh [OPTIONS]
+  ./dbhub.sh restore [OPTIONS]
   bash scripts/restore.sh [OPTIONS]
 
 Options:
@@ -49,16 +49,17 @@ Options:
 
 Examples:
   1. Interactive restore wizard:
-     ./restore.sh
+     ./dbhub.sh restore
+     (or: bash scripts/restore.sh)
 
   2. List available remote backups:
-     ./restore.sh --ssh \"root@192.168.31.33\" --list
+     ./dbhub.sh restore --ssh \"root@192.168.31.33\" --list
 
   3. Restore latest PostgreSQL backup remotely using specific .env:
-     ./restore.sh --ssh \"root@192.168.31.33\" --env envs/mall.env --db postgres --latest
+     ./dbhub.sh restore --ssh \"root@192.168.31.33\" --env envs/mall.env --db postgres --latest
 
   4. Restore specific MySQL backup locally:
-     ./restore.sh --local --file mysql_mall-db_app_db_20261112_020000.sql.zst"
+     ./dbhub.sh restore --local --file mysql_mall-db_app_db_20261112_020000.sql.zst"
 }
 
 # Parse Command-Line Arguments

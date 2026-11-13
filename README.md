@@ -20,7 +20,7 @@
 
 ## 🌟 Highlights & Features
 
-- ⚡ **Unified CLI (`dbhub.sh`)**: Deploy, manage, backup, inspect, and restore databases locally or across remote servers via SSH (`dbhub.sh` with `deploy.sh` backwards-compatible alias).
+- ⚡ **Unified CLI (`dbhub.sh`)**: Deploy, manage, backup, inspect, and restore databases locally or across remote servers via SSH.
 - 🗜️ **Extreme Auto-Backup (`zstd -19`)**:
   - Direct stream compression into **Zstandard level 19 (`zstd -19 -T0`)** (with automatic fallback to `xz -9e` or `gzip -9`).
   - No temporary uncompressed dumps taking up gigabytes of disk space.
@@ -31,14 +31,14 @@
 - 🧹 **Intelligent Retention Pruning**:
   - Specify maximum backups to retain per database (e.g. `--backup-retention 7`).
   - Automatically cleans up older archives and checksum files after each backup run.
-- 🔄 **Universal Restore Engine (`restore.sh`)**:
+- 🔄 **Universal Restore Engine (`scripts/restore.sh` / `./dbhub.sh restore`)**:
   - Generic restore tool for Local and Remote (SSH) deployments.
   - Automatically scans and lists available backups with timestamps and sizes.
   - Decompresses and streams data into the target container with safety confirmation and post-restore health verification.
 - 📊 **Real-Time Backup Status Inspection**:
-  - One command (`./dbhub.sh -a backup-status`) to view daemon status, next trigger time, schedule, disk usage, backup file inventory table, and execution logs.
+  - One command (`./dbhub.sh backup-status` or `./dbhub.sh -a backup-status`) to view daemon status, next trigger time, schedule, disk usage, backup file inventory table, and execution logs.
 - 🧩 **Clean Modular Architecture**:
-  - Decoupled into `scripts/lib/common.sh`, `scripts/lib/scheduler.sh`, `scripts/lib/summary.sh`, `scripts/backup.sh`, and `scripts/restore.sh`.
+  - Decoupled into `scripts/lib/common.sh`, `scripts/lib/scheduler.sh`, `scripts/lib/summary.sh`, `scripts/backup.sh`, `scripts/restore.sh`, and `scripts/deploy.sh`.
 - 🛠️ **Deep Production Performance Tuning**:
   - Pre-tuned configurations for NVMe/SSDs, memory buffers, thread concurrency, and Linux host kernel sysctl optimizations.
 
@@ -49,8 +49,6 @@
 ```text
 database-hub/
 ├── dbhub.sh                      # Primary Unified CLI (Deploy, Backup, Restore, Status)
-├── restore.sh                    # Universal Database Restore CLI (Local & Remote SSH)
-├── deploy.sh                     # Compatibility wrapper (forwards to dbhub.sh)
 ├── docker-compose.yml            # Docker Compose specification with modular profiles
 ├── .env.example                  # Environment configuration with backup & tuning options
 ├── docs/                         # Documentation and operational skills
@@ -66,6 +64,7 @@ database-hub/
 │   │   ├── common.sh             # Shared utilities, SSH execution, extreme compressor detection
 │   │   ├── scheduler.sh          # Systemd timer & cron auto-backup manager
 │   │   └── summary.sh            # Formatted access summary & banners
+│   ├── deploy.sh                 # Deployment script alias (forwards to dbhub.sh)
 │   ├── backup.sh                 # Backup engine (dump, extreme compression, retention, status)
 │   ├── restore.sh                # Restore engine (inspect, decompress, import, verify)
 │   ├── healthcheck.sh            # Live database connectivity & health check
@@ -95,7 +94,7 @@ cp envs/mongodb/prod-high-perf.env.example envs/mongodb/prod.env
 
 ### 2. Interactive Wizard Mode
 
-Simply run `./dbhub.sh` (or `./deploy.sh`) without arguments to launch the wizard:
+Simply run `./dbhub.sh` without arguments to launch the wizard:
 
 ```bash
 ./dbhub.sh
@@ -181,38 +180,35 @@ ID   DATABASE     CREATED AT           SIZE       FILENAME
 
 ---
 
-## 🔄 Universal Database Restore (`restore.sh`)
+## 🔄 Universal Database Restore (`./dbhub.sh restore`)
 
-The generic restore tool automatically connects to the local or remote host, inspects existing backups, and provides an interactive selection menu or non-interactive CLI flags:
+The universal restore tool automatically connects to the local or remote host, inspects existing backups, and provides an interactive selection menu or non-interactive CLI flags:
 
 ### 1. Interactive Restore Wizard
 
 ```bash
 # Launch interactive restore wizard (Local or Remote)
-./restore.sh
+./dbhub.sh restore
 ```
 
 ### 2. List Available Backups
 
 ```bash
 # List local backups
-./restore.sh --list
+./dbhub.sh restore --list
 
 # List remote backups over SSH
-./restore.sh --ssh "root@192.168.31.33" --list
+./dbhub.sh restore --ssh "root@192.168.31.33" --list
 ```
 
 ### 3. Restore by Database or File
 
 ```bash
 # Restore latest PostgreSQL backup on remote server
-./restore.sh --ssh "root@192.168.31.33" --db postgres --latest
+./dbhub.sh restore --ssh "root@192.168.31.33" --db postgres --latest
 
 # Restore specific backup archive locally
-./restore.sh --local --file postgres_app_db_20261112_020000.sql.zst
-
-# Restore via dbhub.sh
-./dbhub.sh --action restore
+./dbhub.sh restore --local --file postgres_app_db_20261112_020000.sql.zst
 ```
 
 ---

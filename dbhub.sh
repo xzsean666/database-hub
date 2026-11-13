@@ -45,6 +45,12 @@ ENABLE_AUTO_BACKUP=false
 AUTO_BACKUP_SCHEDULE="0 2 * * *" # Default: 1 day 1 time (02:00 AM)
 AUTO_BACKUP_RETENTION=7          # Max backups retention count
 
+# Restore configuration
+RESTORE_FILE=""
+USE_LATEST=false
+LIST_ONLY=false
+FORCE_YES=false
+
 # ==============================================================================
 # Help Message
 # ==============================================================================
@@ -52,7 +58,22 @@ show_help() {
     echo -e "${BOLD}Database Hub - Unified Management & Deployment Tool${NC}
 
 Usage:
-  ./dbhub.sh [OPTIONS]
+  ./dbhub.sh [COMMAND|OPTIONS]
+
+Commands:
+  up                          Deploy and start services (default)
+  down                        Stop and remove services
+  restart                     Restart services
+  status                      Check container health & auto-backup status
+  logs                        Follow live database logs
+  backup                      Trigger immediate database backup
+  backup-status               Check auto-backup daemon status, schedule & files
+  restore                     Launch universal database restore wizard / tool
+  tune-host                   Apply Linux kernel performance tuning
+  make-master                 Upgrade database instance to Master
+  deploy-replica              Deploy Replica tracking a Master instance
+  repl-status                 Check cluster replication status & sync lag
+  scan                        Scan all database environments on host
 
 Options:
   -l, --local                    Deploy/manage on the local machine (default if --ssh is omitted)
@@ -60,23 +81,15 @@ Options:
                                  Example: -s \"ssh -i ~/ssh/key -p 22 root@192.168.31.33\"
                                  Example: -s \"root@192.168.31.33\"
   -e, --env <path>               Path to .env configuration file (default: .env or .env.example)
-  -d, --db <databases>           Comma-separated list of databases to deploy:
+  -d, --db <databases>           Comma-separated list of databases to deploy / restore:
                                  postgres, mysql, mongodb, redis, all (default: all)
-  -a, --action <action>          Action to perform:
-                                 up            - Deploy and start services (default)
-                                 down          - Stop and remove services
-                                 restart       - Restart services
-                                 status        - Check container health & status
-                                 logs          - View container logs
-                                 backup        - Trigger immediate database backup
-                                 backup-status - Check auto-backup daemon status, schedule & files
-                                 restore       - Launch universal database restore wizard
-                                 make-master   - Upgrade database instance to Master
-                                 deploy-replica- Deploy Replica tracking a Master instance
-                                 repl-status   - Check cluster replication status & sync lag
-                                 scan          - Scan all database environments on host
-                                 tune-host     - Apply Linux kernel performance tuning
+  -a, --action <action>          Action to perform (up, down, restart, status, logs, backup,
+                                 backup-status, restore, make-master, deploy-replica, repl-status, scan, tune-host)
   -r, --remote-dir <path>        Remote directory on server (default: /opt/database-hub)
+  -f, --file <filename>          Specific backup archive file to restore
+      --latest                   Restore the latest backup for specified --db
+      --list                     List available backup archives on target and exit
+  -y, --yes                      Assume Yes to all confirmation prompts (e.g. restore overwrite)
       --make-master, --upgrade-to-master  Shortcut to upgrade database stack to Master
       --replica, --deploy-replica         Shortcut to deploy database stack as Replica
       --master-ssh \"<cmd>\"       SSH connection command to Master server
@@ -103,10 +116,12 @@ Examples:
      ./dbhub.sh --ssh \"ssh -i ~/ssh/key -p 22 root@192.168.31.33\" --env .env --auto-backup
 
   4. Inspect backup status remotely:
-     ./dbhub.sh --ssh \"root@192.168.31.33\" --action backup-status
+     ./dbhub.sh backup-status --ssh \"root@192.168.31.33\"
 
   5. Launch restore tool:
-     ./dbhub.sh --action restore"
+     ./dbhub.sh restore
+     ./dbhub.sh restore --list
+     ./dbhub.sh restore --ssh \"root@192.168.31.33\" --db postgres --latest"
 }
 
 # ==============================================================================
@@ -122,6 +137,10 @@ parse_args() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            up|down|restart|status|logs|backup|backup-status|restore|make-master|deploy-replica|repl-status|scan|tune-host)
+                ACTION="$1"
+                shift
+                ;;
             -l|--local)
                 TARGET="local"
                 shift
@@ -146,6 +165,22 @@ parse_args() {
             -r|--remote-dir)
                 REMOTE_DIR="$2"
                 shift 2
+                ;;
+            -f|--file)
+                RESTORE_FILE="$2"
+                shift 2
+                ;;
+            --latest)
+                USE_LATEST=true
+                shift
+                ;;
+            --list)
+                LIST_ONLY=true
+                shift
+                ;;
+            -y|--yes)
+                FORCE_YES=true
+                shift
                 ;;
             --make-master|--upgrade-to-master)
                 ACTION="make-master"
@@ -565,7 +600,15 @@ execute_local() {
             bash "$PROJECT_ROOT/scripts/backup.sh" --env "$ENV_FILE" status
             ;;
         restore)
-            bash "$PROJECT_ROOT/scripts/restore.sh" --local --env "$ENV_FILE"
+            local restore_cmd=("$PROJECT_ROOT/scripts/restore.sh" --local)
+            if [ -n "$ENV_FILE" ]; then restore_cmd+=(--env "$ENV_FILE"); fi
+            if [ -n "$SELECTED_DBS" ] && [ "$SELECTED_DBS" != "all" ]; then restore_cmd+=(--db "$SELECTED_DBS"); fi
+            if [ -n "$RESTORE_FILE" ]; then restore_cmd+=(--file "$RESTORE_FILE"); fi
+            if [ "$USE_LATEST" = true ]; then restore_cmd+=(--latest); fi
+            if [ "$LIST_ONLY" = true ]; then restore_cmd+=(--list); fi
+            if [ "$FORCE_YES" = true ]; then restore_cmd+=(--yes); fi
+            if [ "${INTERACTIVE_MODE:-false}" = true ]; then restore_cmd+=(--interactive); fi
+            bash "${restore_cmd[@]}"
             ;;
         make-master)
             log_step "Upgrading instance [${INSTANCE_ID:-database-hub}] to Master..."
@@ -616,7 +659,16 @@ execute_remote() {
         run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/backup.sh --env '${ENV_FILE:-.env}' run-all"
         return
     elif [ "$ACTION" = "restore" ]; then
-        bash "$PROJECT_ROOT/scripts/restore.sh" --ssh "$SSH_CMD" --env "$ENV_FILE" --remote-dir "$REMOTE_DIR"
+        local restore_cmd=("$PROJECT_ROOT/scripts/restore.sh" --ssh "$SSH_CMD")
+        if [ -n "$ENV_FILE" ]; then restore_cmd+=(--env "$ENV_FILE"); fi
+        if [ -n "$REMOTE_DIR" ]; then restore_cmd+=(--remote-dir "$REMOTE_DIR"); fi
+        if [ -n "$SELECTED_DBS" ] && [ "$SELECTED_DBS" != "all" ]; then restore_cmd+=(--db "$SELECTED_DBS"); fi
+        if [ -n "$RESTORE_FILE" ]; then restore_cmd+=(--file "$RESTORE_FILE"); fi
+        if [ "$USE_LATEST" = true ]; then restore_cmd+=(--latest); fi
+        if [ "$LIST_ONLY" = true ]; then restore_cmd+=(--list); fi
+        if [ "$FORCE_YES" = true ]; then restore_cmd+=(--yes); fi
+        if [ "${INTERACTIVE_MODE:-false}" = true ]; then restore_cmd+=(--interactive); fi
+        bash "${restore_cmd[@]}"
         return
     elif [ "$ACTION" = "repl-status" ]; then
         run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/replication.sh status --env '${ENV_FILE:-.env}'"

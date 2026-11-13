@@ -153,10 +153,10 @@ When `--auto-backup` is enabled, `dbhub.sh` registers a Systemd timer (`dbhub-ba
 ### Universal Restore
 ```bash
 # Interactive restore wizard (scans available archives and guides safely)
-./restore.sh
+./dbhub.sh restore
 
 # Non-interactive remote restore of the latest backup
-./restore.sh --ssh "root@host" --env .env --db mysql --latest
+./dbhub.sh restore --ssh "root@host" --env .env --db mysql --latest
 ```
 
 ---
