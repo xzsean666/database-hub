@@ -6,7 +6,6 @@
 
 set -euo pipefail
 
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -23,6 +22,7 @@ else
 fi
 
 SYSCTL_CONF="/etc/sysctl.d/99-database-hub.conf"
+$SUDO mkdir -p "$(dirname "$SYSCTL_CONF")"
 
 $SUDO tee "$SYSCTL_CONF" > /dev/null << 'EOF'
 # Database Hub System Optimizations

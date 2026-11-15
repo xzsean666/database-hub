@@ -5,6 +5,7 @@
 # ==============================================================================
 
 mysql_make_master() {
+    # shellcheck disable=SC2034
     local env_file="$1"
     local inst_id="${INSTANCE_ID:-database-hub}"
     local container="${MYSQL_CONTAINER_NAME:-${inst_id}-mysql}"
@@ -27,7 +28,9 @@ mysql_make_master() {
 CREATE USER IF NOT EXISTS '${repl_user}'@'%' IDENTIFIED BY '${repl_pass}';
 ALTER USER '${repl_user}'@'%' IDENTIFIED BY '${repl_pass}';
 GRANT REPLICATION SLAVE, REPLICATION CLIENT, BACKUP_ADMIN ON *.* TO '${repl_user}'@'%';
+GRANT SELECT, RELOAD, SHOW VIEW, TRIGGER, LOCK TABLES ON *.* TO '${repl_user}'@'%';
 FLUSH PRIVILEGES;
+INSTALL PLUGIN clone SONAME 'mysql_clone.so';
 EOF
 
     log_success "MySQL [$inst_id] is now operating as Master (User: $repl_user, Port: $port)."
@@ -45,6 +48,36 @@ mysql_bootstrap_replica() {
     local root_pass="$6"
 
     log_step "Setting up MySQL replica on container '$replica_container'..."
+
+    # Install clone plugin if supported
+    docker exec -i -e MYSQL_PWD="$root_pass" "$replica_container" mysql -u root -e "INSTALL PLUGIN clone SONAME 'mysql_clone.so';" >/dev/null 2>&1 || true
+
+    # Check for existing user databases on Master to determine if baseline sync is required
+    log_info "Checking Master database inventory..."
+    local user_dbs
+    user_dbs=$(docker exec -i -e MYSQL_PWD="$repl_pass" "$replica_container" mysql -h "$master_host" -P "$master_port" -u "$repl_user" -e "SHOW DATABASES;" 2>/dev/null | grep -Ev '^(Database|information_schema|performance_schema|sys|mysql)$' || true)
+
+    if [ -n "$user_dbs" ]; then
+        log_info "Existing database(s) detected on Master: $(echo "$user_dbs" | tr '\n' ' ')"
+        log_info "Performing initial consistent baseline sync via single-transaction snapshot..."
+        local dbs_array=()
+        while IFS= read -r db_item; do
+            [ -n "$db_item" ] && dbs_array+=("$db_item")
+        done <<< "$user_dbs"
+
+        if docker exec -i -e MYSQL_PWD="$repl_pass" "$replica_container" mysqldump \
+            -h "$master_host" -P "$master_port" -u "$repl_user" \
+            --databases "${dbs_array[@]}" \
+            --single-transaction \
+            --quick \
+            --routines \
+            --triggers \
+            --set-gtid-purged=ON 2>/dev/null | docker exec -i -e MYSQL_PWD="$root_pass" "$replica_container" mysql -u root; then
+            log_success "Initial dataset synchronized with Master (GTID set aligned)."
+        else
+            log_warn "Initial mysqldump sync returned non-zero. Falling back to GTID binlog auto-position..."
+        fi
+    fi
 
     log_info "Configuring GTID replication channel and read-only mode..."
     local attempts=0

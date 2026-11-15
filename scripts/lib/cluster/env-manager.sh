@@ -17,7 +17,7 @@ scan_env_files() {
     done < <(find "$target_dir" -maxdepth 3 -type f \( -name ".env" -o -name "*.env" \) | sort)
 
     for f in "${files[@]}"; do
-        local rel_path="${f#$target_dir/}"
+        local rel_path="${f#"$target_dir"/}"
         local inst_id
         inst_id=$(grep -E '^[[:space:]]*INSTANCE_ID=' "$f" 2>/dev/null | head -n1 | cut -d'=' -f2- | tr -d ' "\r' || true)
         inst_id="${inst_id:-database-hub}"

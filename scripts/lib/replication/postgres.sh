@@ -5,6 +5,7 @@
 # ==============================================================================
 
 postgres_make_master() {
+    # shellcheck disable=SC2034
     local env_file="$1"
     local inst_id="${INSTANCE_ID:-database-hub}"
     local container="${POSTGRES_CONTAINER_NAME:-${inst_id}-postgres}"
@@ -73,7 +74,8 @@ postgres_bootstrap_replica() {
     # Ensure host directory is empty for clean pg_basebackup
     if [ -d "$replica_data_dir" ] && [ "$(ls -A "$replica_data_dir" 2>/dev/null)" ]; then
         log_warn "Target data directory '$replica_data_dir' is not empty. Creating safety backup..."
-        local bk_dir="${replica_data_dir}_backup_$(date +%s)"
+        local bk_dir
+        bk_dir="${replica_data_dir}_backup_$(date +%s)"
         mv "$replica_data_dir" "$bk_dir"
         log_info "Existing data backed up to: $bk_dir"
     fi

@@ -93,7 +93,7 @@ print_connection_summary() {
         echo -e "  Port:      ${redis_port}"
         echo -e "  Password:  ${redis_pass}"
         echo -e "  URI:       \033[0;36mredis://:${redis_pass}@${host}:${redis_port}\033[0m"
-        echo -e "  CLI:       redis-cli -h ${host} -p ${redis_port} -a ${redis_pass}\n"
+        echo -e "  CLI:       REDISCLI_AUTH=\"${redis_pass}\" redis-cli -h ${host} -p ${redis_port}\n"
     fi
     echo -e "\033[0;32m========================================================================\033[0m"
 }

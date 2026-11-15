@@ -110,7 +110,7 @@ Wants=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory="$project_dir"
+WorkingDirectory=$project_dir
 Environment=AUTO_BACKUP_RETENTION=$retention
 Environment=INSTANCE_ID=$inst_id
 Environment=ENV_FILE=$env_path

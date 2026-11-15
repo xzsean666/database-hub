@@ -71,7 +71,10 @@ try:
     v = d
     for k in keys:
         if k: v = v.get(k, '')
-    print(v if v is not None else '')
+    if isinstance(v, bool):
+        print(str(v).lower())
+    else:
+        print(v if v is not None else '')
 except Exception:
     pass
 " "$key" <<< "$json_str" 2>/dev/null || true

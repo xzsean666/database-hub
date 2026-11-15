@@ -188,7 +188,7 @@ parse_args() {
                 ;;
             --replica|--deploy-replica)
                 ACTION="deploy-replica"
-                ROLE="replica"
+                export ROLE="replica"
                 shift
                 ;;
             --scan)
@@ -270,7 +270,7 @@ run_interactive() {
         echo ""
         echo -e "${BOLD}Enter SSH Connection Command or Destination:${NC}"
         echo "  Examples:"
-        echo "    ssh -i ~/ssh/sean -p 22 root@192.168.31.33"
+        echo "    ssh -i ~/.ssh/id_rsa -p 22 root@192.168.31.33"
         echo "    root@192.168.31.33"
         read -rp "SSH string: " SSH_CMD
         while [ -z "$SSH_CMD" ]; do
@@ -348,7 +348,7 @@ run_interactive() {
             echo -e "${BOLD}Select Master Environment to replicate:${NC}"
             local idx=1
             for e in "${master_envs[@]}"; do
-                IFS='|' read -r ep ei er ed <<< "$e"
+                IFS='|' read -r ep ei _ ed <<< "$e"
                 echo "  $idx) $ep (Instance: $ei, DBs: $ed)"
                 ((idx++))
             done
@@ -520,9 +520,9 @@ ensure_mongodb_keyfile() {
         else
             head -c 512 /dev/urandom | base64 > "$keyfile"
         fi
-        chown 999:999 "$keyfile" 2>/dev/null || true
-        chmod 400 "$keyfile" 2>/dev/null || true
     fi
+    chown 999:999 "$keyfile" 2>/dev/null || true
+    chmod 400 "$keyfile" 2>/dev/null || true
 }
 
 execute_local() {
@@ -705,15 +705,17 @@ execute_remote() {
         if [ "$ACTION" = "tune-host" ]; then exit 0; fi
     fi
 
-    # 4. Sync Project Directory to Remote using fast tar stream over SSH
+    # 4. Sync Project Directory to Remote using fast tar stream over SSH (exclude untracked/secret envs)
     log_info "Syncing configuration and files to remote '$REMOTE_DIR'..."
-    tar --exclude='.git' --exclude='data' --exclude='*.log' --exclude='backups' -czf - -C "$PROJECT_ROOT" . | \
+    tar --exclude='.git' --exclude='data' --exclude='*.log' --exclude='backups' \
+        --exclude='.env' --exclude='*.env' --exclude='envs/**/*.env' --exclude='envs/**/.env*' \
+        -czf - -C "$PROJECT_ROOT" . | \
         run_remote_cmd "mkdir -p '$REMOTE_DIR' && tar -xzf - -C '$REMOTE_DIR'"
 
     # 5. Sync the specified .env file safely to its relative path
     local remote_env_rel="${ENV_FILE:-.env}"
     if [[ "$remote_env_rel" = /* ]]; then
-        remote_env_rel="${remote_env_rel#$PROJECT_ROOT/}"
+        remote_env_rel="${remote_env_rel#"$PROJECT_ROOT"/}"
     fi
     remote_env_rel="${remote_env_rel#./}"
 

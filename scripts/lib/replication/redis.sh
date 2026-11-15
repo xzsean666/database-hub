@@ -5,6 +5,7 @@
 # ==============================================================================
 
 redis_make_master() {
+    # shellcheck disable=SC2034
     local env_file="$1"
     local inst_id="${INSTANCE_ID:-database-hub}"
     local container="${REDIS_CONTAINER_NAME:-${inst_id}-redis}"

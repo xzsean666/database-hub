@@ -170,12 +170,14 @@ backup_mongodb() {
     local start_time
     start_time=$(date +%s)
 
-    if docker exec "$container" mongodump \
-        --username "$user" \
-        --password "$pass" \
-        --authenticationDatabase admin \
-        --db "$db" \
-        --archive 2>/dev/null | $compressor > "$outfile"; then
+    if docker exec -e MONGO_PASS="$pass" "$container" sh -c '
+        mongodump \
+            --username "$1" \
+            --password "$MONGO_PASS" \
+            --authenticationDatabase admin \
+            --db "$2" \
+            --archive 2>/dev/null
+    ' -- "$user" "$db" | $compressor > "$outfile"; then
         if [ -s "$outfile" ]; then
             sha256sum "$outfile" | awk '{print $1}' > "${outfile}.sha256"
             local end_time
@@ -228,6 +230,7 @@ backup_redis() {
     local bgsave_out
     bgsave_out=$("${redis_cli_base[@]}" bgsave 2>&1 || true)
     log_info "Redis bgsave response: $bgsave_out"
+    sleep 1
 
     # Wait for bgsave to finish (poll up to 60 seconds)
     local wait_sec=0
@@ -270,35 +273,60 @@ backup_redis() {
 }
 
 # ==============================================================================
-# Retention & Pruning Engine (Per INSTANCE_ID)
+# Retention & Pruning Engine (Per INSTANCE_ID & Per Database)
 # ==============================================================================
 prune_backups() {
     local max_keep="${1:-$AUTO_BACKUP_RETENTION}"
     local inst_id="${INSTANCE_ID:-database-hub}"
     log_info "Checking retention policy for [$inst_id] (max keep: $max_keep backups per database)..."
 
-    local db_prefixes=("postgres" "mysql" "mongodb" "redis")
     local total_pruned=0
 
-    for prefix in "${db_prefixes[@]}"; do
-        local files=()
-        # Find matching backup files strictly for this specific INSTANCE_ID
-        while IFS= read -r file; do
-            [ -n "$file" ] && files+=("$file")
-        done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${prefix}_${inst_id}_*" ! -name "*.sha256" | sort -r)
+    # 1. Discover all distinct target keys for this instance (e.g. postgres_inst_app_db, redis_inst)
+    local target_keys=()
+    while IFS= read -r file; do
+        if [ -n "$file" ]; then
+            local bname
+            bname=$(basename "$file")
+            # Strip timestamp and extension: _YYYYMMDD_HHMMSS.*
+            local k="${bname%_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].*}"
+            if [ -n "$k" ] && [ "$k" != "$bname" ]; then
+                target_keys+=("$k")
+            fi
+        fi
+    done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "*_${inst_id}_*" ! -name "*.sha256")
 
-        # Fallback only if inst_id is "database-hub" (legacy files without inst_id in name)
-        if [ "$inst_id" = "database-hub" ]; then
+    # Add legacy prefix keys if inst_id is "database-hub"
+    if [ "$inst_id" = "database-hub" ]; then
+        local legacy_prefixes=("postgres" "mysql" "mongodb" "redis")
+        for p in "${legacy_prefixes[@]}"; do
             while IFS= read -r file; do
                 if [ -n "$file" ]; then
                     local bname
                     bname=$(basename "$file")
-                    if [[ "$bname" =~ ^${prefix}_[0-9]{8}_[0-9]{6}\. ]]; then
-                        files+=("$file")
+                    local k="${bname%_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].*}"
+                    if [ -n "$k" ] && [ "$k" != "$bname" ]; then
+                        target_keys+=("$k")
                     fi
                 fi
-            done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${prefix}_*" ! -name "*.sha256" | sort -r)
-        fi
+            done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${p}_*" ! -name "*.sha256")
+        done
+    fi
+
+    # Deduplicate target keys
+    local unique_keys=()
+    if [ ${#target_keys[@]} -gt 0 ]; then
+        while IFS= read -r uk; do
+            [ -n "$uk" ] && unique_keys+=("$uk")
+        done < <(printf "%s\n" "${target_keys[@]}" | sort -u)
+    fi
+
+    # 2. Prune files for each distinct database key independently
+    for key in "${unique_keys[@]}"; do
+        local files=()
+        while IFS= read -r file; do
+            [ -n "$file" ] && files+=("$file")
+        done < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${key}_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].*" ! -name "*.sha256" | sort -r)
 
         local count=${#files[@]}
         if [ "$count" -gt "$max_keep" ]; then
@@ -361,7 +389,9 @@ list_backups() {
 
         # Extract INSTANCE_ID from filename: <db>_<inst>_...
         local extracted_inst="default"
-        if [[ "$fname" =~ ^([^_]+)_([^_]+)_ ]]; then
+        if [ -n "$filter_inst" ] && [[ "$fname" == *"_${filter_inst}_"* ]]; then
+            extracted_inst="$filter_inst"
+        elif [[ "$fname" =~ ^([^_]+)_([^_]+)_ ]]; then
             extracted_inst="${BASH_REMATCH[2]}"
         fi
 

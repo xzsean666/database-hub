@@ -37,6 +37,9 @@ MASTER_SSH=""
 TARGET_DBS="all"
 MAX_RATE="30M"
 MASTER_HOST_OVERRIDE=""
+REMOTE_DIR="${REMOTE_DIR:-/opt/database-hub}"
+SLAVE_HOST=""
+SLAVE_PORT="27017"
 
 show_help() {
     echo -e "${BOLD}Database Hub - Replication Management Engine${NC}
@@ -45,16 +48,19 @@ Usage:
   ./scripts/replication.sh <action> [options]
 
 Actions:
-  make-master        Upgrade an existing standalone database instance to Master
-  deploy-replica     Deploy and bootstrap a replica from Master configuration
-  status             Inspect replication status and lag for an instance
-  scan               Scan and list active database environments on this host
+  make-master             Upgrade an existing standalone database instance to Master
+  deploy-replica          Deploy and bootstrap a replica from Master configuration
+  status                  Inspect replication status and lag for an instance
+  scan                    Scan and list active database environments on this host
+  register-mongo-member   Register a secondary node into MongoDB Replica Set
 
 Options:
   -e, --env <path>           Path to .env file for target instance
   -m, --master-env <path>    Path to Master's .env file (for replica deployment)
       --master-ssh <cmd>     SSH command to connect to Master server
       --master-host <ip>     Override Master IP address (auto-detected if omitted)
+      --slave-host <ip>      Secondary host IP (for register-mongo-member)
+      --slave-port <port>    Secondary host port (default: 27017)
   -d, --db <databases>       Target databases: postgres, mysql, redis, mongodb, all (default: all)
       --max-rate <rate>      Bandwidth limit for initial sync (default: 30M)
   -h, --help                 Show this help message
@@ -87,6 +93,14 @@ parse_args() {
                 ;;
             --master-host)
                 MASTER_HOST_OVERRIDE="$2"
+                shift 2
+                ;;
+            --slave-host)
+                SLAVE_HOST="$2"
+                shift 2
+                ;;
+            --slave-port)
+                SLAVE_PORT="$2"
                 shift 2
                 ;;
             -d|--db)
@@ -180,7 +194,8 @@ do_make_master() {
     fi
 
     # 5. Persist instance metadata
-    local meta_json="{
+    local meta_json
+    meta_json="{
   \"instance_id\": \"$inst_id\",
   \"role\": \"master\",
   \"master_host\": \"$master_host\",
@@ -304,9 +319,9 @@ do_deploy_replica() {
     if [ ! -f "$keyfile" ]; then
         mkdir -p "$(dirname "$keyfile")"
         openssl rand -base64 756 > "$keyfile" 2>/dev/null || head -c 512 /dev/urandom | base64 > "$keyfile"
-        chown 999:999 "$keyfile" 2>/dev/null || true
-        chmod 400 "$keyfile" 2>/dev/null || true
     fi
+    chown 999:999 "$keyfile" 2>/dev/null || true
+    chmod 400 "$keyfile" 2>/dev/null || true
 
     local compose_cmd="docker compose -p $r_inst --env-file $replica_env $profile_flags up -d"
     eval "$compose_cmd"
@@ -348,16 +363,45 @@ do_deploy_replica() {
         local slave_host
         slave_host=$(detect_primary_ip "$m_host")
         if [ -n "$MASTER_SSH" ]; then
-            run_remote_cmd "cd /opt/database-hub && bash scripts/replication.sh register-mongo-member --env .env --slave-host '$slave_host' --slave-port '${MONGO_PORT:-27017}'" || true
+            log_info "Registering MongoDB secondary node ($slave_host:${MONGO_PORT:-27017}) into Master via SSH..."
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/replication.sh register-mongo-member --env '${MASTER_ENV:-.env}' --slave-host '$slave_host' --slave-port '${MONGO_PORT:-27017}'"
         else
             local m_ctr="${m_inst}-mongodb"
             if docker ps --format '{{.Names}}' | grep -q "^${m_ctr}$"; then
-                mongodb_bootstrap_replica "$m_host" "$mg_m_port" "$m_ctr" "${MONGO_INITDB_ROOT_USERNAME:-root}" "${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_pass_2026}" "$slave_host" "${MONGO_PORT:-27017}"
+                mongodb_bootstrap_replica "$m_host" "$mg_m_port" "$m_ctr" "${MONGO_INITDB_ROOT_USERNAME:-root}" "${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_secure_pass}" "$slave_host" "${MONGO_PORT:-27017}"
             fi
         fi
     fi
 
     log_success "Replica instance [$r_inst] deployed and streaming from Master [$m_host]!"
+}
+
+# ==============================================================================
+# Action: register-mongo-member
+# Registers a secondary node into the local MongoDB Replica Set
+# ==============================================================================
+do_register_mongo_member() {
+    load_env_file "$ENV_FILE" "$PROJECT_ROOT" || true
+    local inst_id="${INSTANCE_ID:-database-hub}"
+    local m_ctr="${MONGO_CONTAINER_NAME:-${inst_id}-mongodb}"
+    local m_port="${MONGO_PORT:-27017}"
+    local m_user="${MONGO_INITDB_ROOT_USERNAME:-root}"
+    local m_pass="${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_secure_pass}"
+    local s_host="${SLAVE_HOST:-}"
+    local s_port="${SLAVE_PORT:-27017}"
+
+    if [ -z "$s_host" ]; then
+        log_error "Missing required parameter --slave-host for register-mongo-member"
+        return 1
+    fi
+
+    log_step "Registering MongoDB secondary node ($s_host:$s_port) into Master [$inst_id]..."
+    if ! docker ps --format '{{.Names}}' | grep -q "^${m_ctr}$"; then
+        log_error "Master MongoDB container '$m_ctr' is not running."
+        return 1
+    fi
+
+    mongodb_bootstrap_replica "127.0.0.1" "$m_port" "$m_ctr" "$m_user" "$m_pass" "$s_host" "$s_port"
 }
 
 # ==============================================================================
@@ -439,6 +483,9 @@ main() {
             ;;
         deploy-replica)
             do_deploy_replica
+            ;;
+        register-mongo-member)
+            do_register_mongo_member
             ;;
         status|repl-status)
             do_status

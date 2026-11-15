@@ -86,7 +86,7 @@ cp envs/postgres/prod-high-perf.env.example envs/postgres/billing.env
 cp envs/redis/cache-lru.env.example envs/redis/cache.env
 
 ./dbhub.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
+  --ssh "ssh -i ~/.ssh/id_rsa -p 22 root@192.168.31.33" \
   --env envs/redis/cache.env \
   --db redis
 ```
@@ -96,7 +96,7 @@ cp envs/redis/cache-lru.env.example envs/redis/cache.env
 cp envs/all/prod.env.example envs/all/my-prod.env
 
 ./dbhub.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
+  --ssh "ssh -i ~/.ssh/id_rsa -p 22 root@192.168.31.33" \
   --env envs/all/my-prod.env \
   --db postgres,redis
 ```
@@ -104,7 +104,7 @@ cp envs/all/prod.env.example envs/all/my-prod.env
 ### 示例 5: 远程服务健康检查与备份状态监控
 ```bash
 ./dbhub.sh \
-  --ssh "ssh -i ~/ssh/sean -p 22 root@192.168.31.33" \
+  --ssh "ssh -i ~/.ssh/id_rsa -p 22 root@192.168.31.33" \
   --env envs/postgres/mall.env \
   --action backup-status
 ```

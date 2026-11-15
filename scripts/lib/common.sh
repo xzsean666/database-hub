@@ -4,11 +4,9 @@
 # ==============================================================================
 
 # ANSI Color Codes
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
@@ -44,8 +42,9 @@ setup_ssh_wrapper() {
         return
     fi
 
-    # Strip leading "ssh " if present
-    local cleaned="${raw_ssh#ssh }"
+    # Strip leading "ssh " or "ssh  " with variable spacing
+    local cleaned
+    cleaned=$(echo "$raw_ssh" | sed -E 's/^[[:space:]]*ssh[[:space:]]+//')
 
     # Replace leading ~/ with $HOME/
     cleaned="${cleaned//\~\//$HOME/}"
@@ -67,13 +66,35 @@ get_remote_host() {
         echo "localhost"
         return
     fi
-    # shellcheck disable=SC2086
-    local last_arg
-    last_arg=$(echo "$NORMALIZED_SSH_ARGS" | awk '{print $NF}')
-    if [[ "$last_arg" == *"@"* ]]; then
-        echo "${last_arg#*@}"
+
+    # Accurately extract remote host token by skipping SSH flag arguments
+    local host=""
+    local skip=false
+    for token in $NORMALIZED_SSH_ARGS; do
+        if [ "$skip" = true ]; then
+            skip=false
+            continue
+        fi
+        case "$token" in
+            -i|-p|-l|-o|-F|-c|-b)
+                skip=true
+                ;;
+            -*)
+                ;;
+            *)
+                host="$token"
+                ;;
+        esac
+    done
+
+    if [ -z "$host" ]; then
+        host="localhost"
+    fi
+
+    if [[ "$host" == *"@"* ]]; then
+        echo "${host#*@}"
     else
-        echo "$last_arg"
+        echo "$host"
     fi
 }
 
@@ -107,7 +128,7 @@ load_env_file() {
 
     resolve_database_data_dirs
 
-    ENV_FILE_LOADED="$abs_path"
+    export ENV_FILE_LOADED="$abs_path"
     return 0
 }
 
@@ -137,7 +158,7 @@ resolve_single_db_dir() {
             return 0
         elif [[ "$specific_dir" =~ ^\./ ]]; then
             local sub="${specific_dir#./}"
-            sub="${sub#$db_type/}"
+            sub="${sub#"$db_type"/}"
             if [ -z "$sub" ] || [ "$sub" = "data" ]; then
                 sub="$container_name"
             fi

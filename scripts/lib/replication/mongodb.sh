@@ -5,6 +5,7 @@
 # ==============================================================================
 
 mongodb_make_master() {
+    # shellcheck disable=SC2034
     local env_file="$1"
     local master_host="${2:-127.0.0.1}"
     local inst_id="${INSTANCE_ID:-database-hub}"
@@ -57,6 +58,7 @@ mongodb_make_master() {
 
 mongodb_bootstrap_replica() {
     local master_host="$1"
+    # shellcheck disable=SC2034
     local master_port="$2"
     local master_container="$3"
     local master_user="$4"

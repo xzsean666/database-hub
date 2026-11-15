@@ -34,6 +34,8 @@ if docker ps --format '{{.Names}}' | grep -q "^${PG_NAME}$"; then
     else
         echo -e "${YELLOW}[PENDING] Container running but not ready yet${NC}"
     fi
+elif docker ps -a --format '{{.Names}}' | grep -q "^${PG_NAME}$"; then
+    echo -e "Checking PostgreSQL (${PG_NAME})... ${RED}[STOPPED/CRASHED] Container exited${NC}"
 fi
 
 # 2. MySQL check
@@ -45,6 +47,8 @@ if docker ps --format '{{.Names}}' | grep -q "^${MYSQL_NAME}$"; then
     else
         echo -e "${YELLOW}[PENDING] Container running but initializing${NC}"
     fi
+elif docker ps -a --format '{{.Names}}' | grep -q "^${MYSQL_NAME}$"; then
+    echo -e "Checking MySQL (${MYSQL_NAME})... ${RED}[STOPPED/CRASHED] Container exited${NC}"
 fi
 
 # 3. MongoDB check
@@ -57,6 +61,8 @@ if docker ps --format '{{.Names}}' | grep -q "^${MONGO_NAME}$"; then
     else
         echo -e "${YELLOW}[PENDING] Container running but initializing${NC}"
     fi
+elif docker ps -a --format '{{.Names}}' | grep -q "^${MONGO_NAME}$"; then
+    echo -e "Checking MongoDB (${MONGO_NAME})... ${RED}[STOPPED/CRASHED] Container exited${NC}"
 fi
 
 # 4. Redis check
@@ -69,6 +75,8 @@ if docker ps --format '{{.Names}}' | grep -q "^${REDIS_NAME}$"; then
     else
         echo -e "${YELLOW}[PENDING] Container running but not ready${NC}"
     fi
+elif docker ps -a --format '{{.Names}}' | grep -q "^${REDIS_NAME}$"; then
+    echo -e "Checking Redis (${REDIS_NAME})... ${RED}[STOPPED/CRASHED] Container exited${NC}"
 fi
 
 echo -e "\n${BLUE}Container Overview:${NC}"

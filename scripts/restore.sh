@@ -145,7 +145,7 @@ run_interactive() {
         echo ""
         echo -e "${BOLD}Enter SSH Connection Command or Destination:${NC}"
         echo "  Examples:"
-        echo "    ssh -i ~/ssh/sean -p 22 root@192.168.31.33"
+        echo "    ssh -i ~/.ssh/id_rsa -p 22 root@192.168.31.33"
         echo "    root@192.168.31.33"
         read -rp "SSH string: " SSH_CMD
         while [ -z "$SSH_CMD" ]; do
@@ -191,7 +191,9 @@ fetch_backups() {
             esac
 
             local extracted_inst="default"
-            if [[ "$fname" =~ ^([^_]+)_([^_]+)_ ]]; then
+            if [ -n "${current_inst:-}" ] && [[ "$fname" == *"_${current_inst}_"* ]]; then
+                extracted_inst="$current_inst"
+            elif [[ "$fname" =~ ^([^_]+)_([^_]+)_ ]]; then
                 extracted_inst="${BASH_REMATCH[2]}"
             fi
 
@@ -283,8 +285,12 @@ execute_restore_local() {
                 log_success "PostgreSQL ($db) successfully restored!"
             else
                 log_warn "psql against 'postgres' maintenance db returned non-zero. Attempting fallback to '$db'..."
-                $decompressor "$file_path" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d "$db"
-                log_success "PostgreSQL successfully restored!"
+                if $decompressor "$file_path" | docker exec -i -e PGPASSWORD="${POSTGRES_PASSWORD:-}" "$container" psql -U "$user" -d "$db"; then
+                    log_success "PostgreSQL successfully restored!"
+                else
+                    log_error "PostgreSQL restore failed on fallback to '$db'."
+                    return 1
+                fi
             fi
             ;;
         mysql)
@@ -303,13 +309,15 @@ execute_restore_local() {
             local db="${MONGO_INITDB_DATABASE:-app_db}"
 
             log_info "Streaming decompression ($decompressor) into MongoDB container '$container'..."
-            $decompressor "$file_path" | docker exec -i "$container" mongorestore \
-                --username "$user" \
-                --password "$pass" \
-                --authenticationDatabase admin \
-                --nsInclude="${db}.*" \
-                --archive \
-                --drop
+            $decompressor "$file_path" | docker exec -i -e MONGO_PASS="$pass" "$container" sh -c '
+                mongorestore \
+                    --username "$1" \
+                    --password "$MONGO_PASS" \
+                    --authenticationDatabase admin \
+                    --nsInclude="${2}.*" \
+                    --archive \
+                    --drop 2>/dev/null
+            ' -- "$user" "$db"
             log_success "MongoDB ($db) successfully restored!"
             ;;
         redis)
@@ -318,6 +326,9 @@ execute_restore_local() {
 
             log_info "Stopping Redis container '$container' for consistent snapshot restore..."
             docker stop "$container" >/dev/null
+
+            # Safety trap: ensure Redis container is always restarted even if restore fails
+            trap 'docker start "$container" >/dev/null 2>&1 || true' ERR
 
             log_info "Restoring Redis RDB snapshot into $data_dir..."
             mkdir -p "$data_dir"
@@ -331,6 +342,7 @@ execute_restore_local() {
 
             log_info "Restarting Redis container '$container'..."
             docker start "$container" >/dev/null
+            trap - ERR
             log_success "Redis successfully restored!"
             ;;
         *)
@@ -412,13 +424,7 @@ execute_restore_remote() {
                 pass="${MONGO_INITDB_ROOT_PASSWORD:-mongo_root_secure_pass}"
                 db="${MONGO_INITDB_DATABASE:-app_db}"
                 echo "[INFO] Streaming decompression into MongoDB container '\''$container'\''..."
-                $DECOMP "$file" | docker exec -i "$container" mongorestore \
-                    --username "$user" \
-                    --password "$pass" \
-                    --authenticationDatabase admin \
-                    --nsInclude="${db}.*" \
-                    --archive \
-                    --drop
+                $DECOMP "$file" | docker exec -i -e MONGO_PASS="$pass" "$container" sh -c "mongorestore --username \"\$1\" --password \"\$MONGO_PASS\" --authenticationDatabase admin --nsInclude=\"\$2.*\" --archive --drop 2>/dev/null" -- "$user" "$db"
                 echo "[SUCCESS] MongoDB restored successfully."
                 ;;
             redis)
@@ -426,6 +432,7 @@ execute_restore_remote() {
                 data_dir="${REDIS_DATA_DIR:-/app/database/redis/${container}}"
                 echo "[INFO] Stopping Redis container '\''$container'\''..."
                 docker stop "$container" >/dev/null
+                trap "docker start \"\$container\" >/dev/null 2>&1 || true" ERR
                 echo "[INFO] Restoring Redis data into $data_dir..."
                 mkdir -p "$data_dir"
                 rm -f "$data_dir"/appendonly* "$data_dir"/dump.rdb 2>/dev/null || true
@@ -433,6 +440,7 @@ execute_restore_remote() {
                 chown -R 999:999 "$data_dir" 2>/dev/null || true
                 chmod -R u+rw "$data_dir" 2>/dev/null || true
                 docker start "$container" >/dev/null
+                trap - ERR
                 echo "[SUCCESS] Redis restored successfully."
                 ;;
         esac
@@ -560,7 +568,7 @@ main() {
         fi
     fi
 
-    IFS='|' read -r t_id t_inst t_db t_date t_size t_name t_path <<< "$target_entry"
+    IFS='|' read -r _ t_inst t_db _ t_size t_name t_path <<< "$target_entry"
 
     echo ""
     echo -e "${YELLOW}${BOLD}⚠️  CRITICAL RESTORE CONFIRMATION ⚠️${NC}"
@@ -585,7 +593,7 @@ main() {
 
     local remote_env_rel="${ENV_FILE:-.env}"
     if [[ "$remote_env_rel" = /* ]]; then
-        remote_env_rel="${remote_env_rel#$PROJECT_ROOT/}"
+        remote_env_rel="${remote_env_rel#"$PROJECT_ROOT"/}"
     fi
     remote_env_rel="${remote_env_rel#./}"
 

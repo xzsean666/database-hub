@@ -112,14 +112,14 @@ When deploying remotely, `dbhub.sh` securely packages and streams the codebase a
 ```bash
 # Standard Remote Deploy
 ./dbhub.sh \
-  --ssh "ssh -i ~/ssh/key.pem -p 22 root@192.168.1.100" \
-  --env envs/mysql/.env.soneium.portal.dev \
+  --ssh "ssh -i ~/.ssh/id_rsa -p 22 ubuntu@192.168.1.100" \
+  --env envs/mysql/prod.env \
   --db mysql
 
 # Remote Deploy with Port / Non-standard SSH & Auto Docker Install
 ./dbhub.sh \
-  --ssh "ssh -i ~/ssh/sean -p 443 root@54.248.165.38" \
-  --env envs/mysql/.env.soneium.portal.dev \
+  --ssh "ssh -i ~/.ssh/id_rsa -p 2222 root@198.51.100.1" \
+  --env envs/mysql/prod.env \
   --db mysql \
   --install-docker
 ```
@@ -134,7 +134,7 @@ Once deployed, connection strings depend on the client's network vantage point:
 |---|---|---|---|
 | **Docker Internal** (same docker network) | `${CONTAINER_NAME}` | `3306` / `5432` / `27017` / `6379` | `mysql://user:pass@soneium-portal-dev-mysql:3306/db_name` |
 | **Host Local** (process running on host OS) | `127.0.0.1` | `${HOST_PORT}` (e.g. `10202`) | `mysql://user:pass@127.0.0.1:10202/db_name` |
-| **External Client** (remote developer / cloud) | `${SERVER_IP}` | `${HOST_PORT}` (e.g. `10202`) | `mysql://user:pass@54.248.165.38:10202/db_name` |
+| **External Client** (remote developer / cloud) | `${SERVER_IP}` | `${HOST_PORT}` (e.g. `10202`) | `mysql://user:pass@198.51.100.1:10202/db_name` |
 
 ---
 

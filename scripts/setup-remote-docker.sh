@@ -49,7 +49,11 @@ case "$OS" in
             curl -fsSL "https://download.docker.com/linux/$OS/gpg" | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
             $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
         fi
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS $(lsb_release -cs) stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
+        codename="${VERSION_CODENAME:-}"
+        if [ -z "$codename" ] && command -v lsb_release >/dev/null 2>&1; then
+            codename=$(lsb_release -cs 2>/dev/null || echo "")
+        fi
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS ${codename:-stable} stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
         $SUDO apt-get update -y
         $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         ;;
