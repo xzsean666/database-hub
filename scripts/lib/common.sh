@@ -4,6 +4,7 @@
 # ==============================================================================
 
 # ANSI Color Codes
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -105,7 +106,16 @@ load_env_file() {
     local env_path="${1:-}"
     local project_root="${2:-$(pwd)}"
 
-    if [ -z "$env_path" ] || [ ! -f "$env_path" ]; then
+    if [ -n "$env_path" ]; then
+        if [ ! -f "$env_path" ]; then
+            if [ -f "$project_root/$env_path" ]; then
+                env_path="$project_root/$env_path"
+            else
+                log_error "Specified env file not found: $env_path"
+                return 1
+            fi
+        fi
+    else
         if [ -f "$project_root/.env" ]; then
             env_path="$project_root/.env"
         elif [ -f "$project_root/.env.example" ]; then
@@ -139,6 +149,25 @@ load_env_file() {
 # If DATA_DIR or <DB>_DATA_DIR is absolute path: respect specified path
 # If relative (./...): resolve under /app/database/<engine>/...
 # ==============================================================================
+_strip_relative_db_prefixes() {
+    local sub="$1"
+    local db_type="$2"
+    sub="${sub#./}"
+    local prev=""
+    while [ "$sub" != "$prev" ]; do
+        prev="$sub"
+        if [ "$sub" = "data" ] || [ "$sub" = "$db_type" ]; then
+            sub=""
+        elif [[ "$sub" == data/* ]]; then
+            sub="${sub#data/}"
+        elif [[ "$sub" == "$db_type/"* ]]; then
+            sub="${sub#"$db_type"/}"
+        fi
+    done
+    sub="${sub%/"$db_type"}"
+    echo "${sub%/}"
+}
+
 resolve_single_db_dir() {
     local db_type="$1"
     local container_name="$2"
@@ -153,45 +182,49 @@ resolve_single_db_dir() {
     fi
 
     if [ -n "$specific_dir" ]; then
+        specific_dir="${specific_dir%/}"
         if [[ "$specific_dir" =~ ^/ ]]; then
-            echo "$specific_dir"
-            return 0
-        elif [[ "$specific_dir" =~ ^\./ ]]; then
-            local sub="${specific_dir#./}"
-            sub="${sub#"$db_type"/}"
-            if [ -z "$sub" ] || [ "$sub" = "data" ]; then
-                sub="$container_name"
+            if [[ "$specific_dir" == *"/$db_type" ]]; then
+                echo "${specific_dir}/${container_name}"
+            else
+                echo "$specific_dir"
             fi
-            echo "$base_storage/$db_type/$sub"
             return 0
         else
-            echo "$base_storage/$db_type/$specific_dir"
+            local sub
+            sub=$(_strip_relative_db_prefixes "$specific_dir" "$db_type")
+            if [ -z "$sub" ]; then
+                echo "$base_storage/$db_type/$container_name"
+            elif [ "$sub" = "$container_name" ] || [[ "$sub" == *"/$container_name" ]]; then
+                echo "$base_storage/$db_type/$sub"
+            else
+                echo "$base_storage/$db_type/$sub/$container_name"
+            fi
             return 0
         fi
     fi
 
     if [ -n "$global_dir" ]; then
+        global_dir="${global_dir%/}"
         if [[ "$global_dir" =~ ^/ ]]; then
-            if [[ "$global_dir" == *"/$db_type" ]] || [[ "$global_dir" == *"/$container_name" ]]; then
+            if [[ "$global_dir" == *"/$container_name" ]]; then
                 echo "$global_dir"
+            elif [[ "$global_dir" == *"/$db_type" ]]; then
+                echo "${global_dir}/$container_name"
             else
-                echo "${global_dir%/}/$db_type/$container_name"
+                echo "${global_dir}/$db_type/$container_name"
             fi
-            return 0
-        elif [[ "$global_dir" =~ ^\./ ]]; then
-            local sub="${global_dir#./}"
-            if [[ "$sub" == data/* ]]; then
-                sub="${sub#data/}"
-            elif [ "$sub" = "data" ]; then
-                sub=""
-            fi
-            if [ -z "$sub" ]; then
-                sub="$container_name"
-            fi
-            echo "$base_storage/$db_type/$sub"
             return 0
         else
-            echo "$base_storage/$db_type/$global_dir"
+            local sub
+            sub=$(_strip_relative_db_prefixes "$global_dir" "$db_type")
+            if [ -z "$sub" ]; then
+                echo "$base_storage/$db_type/$container_name"
+            elif [ "$sub" = "$container_name" ] || [[ "$sub" == *"/$container_name" ]]; then
+                echo "$base_storage/$db_type/$sub"
+            else
+                echo "$base_storage/$db_type/$sub/$container_name"
+            fi
             return 0
         fi
     fi
@@ -214,6 +247,83 @@ resolve_database_data_dirs() {
 
     export POSTGRES_CONTAINER_NAME MYSQL_CONTAINER_NAME MONGO_CONTAINER_NAME REDIS_CONTAINER_NAME
     export POSTGRES_DATA_DIR MYSQL_DATA_DIR MONGO_DATA_DIR REDIS_DATA_DIR
+}
+
+# Normalize comma-separated database selection into canonical names (postgres, mysql, mongodb, redis)
+normalize_selected_dbs() {
+    local raw_dbs="${1:-all}"
+    local seen=" "
+    local result=()
+
+    if [ -z "$raw_dbs" ] || [ "$raw_dbs" = "all" ]; then
+        printf '%s\n' postgres mysql mongodb redis
+        return 0
+    fi
+
+    IFS=',' read -ra ADDR <<< "$raw_dbs"
+    for db in "${ADDR[@]}"; do
+        db=$(echo "$db" | xargs)
+        case "$db" in
+            postgres|postgresql) db="postgres" ;;
+            mysql)               db="mysql" ;;
+            mongo|mongodb)       db="mongodb" ;;
+            redis)               db="redis" ;;
+            all)
+                printf '%s\n' postgres mysql mongodb redis
+                return 0
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        if [[ "$seen" != *" $db "* ]]; then
+            seen="${seen}${db} "
+            result+=("$db")
+        fi
+    done
+
+    if [ ${#result[@]} -gt 0 ]; then
+        printf '%s\n' "${result[@]}"
+    fi
+}
+
+# Create host data directories only for selected databases
+ensure_selected_db_data_dirs() {
+    local selected_dbs="${1:-all}"
+    local db
+    while IFS= read -r db; do
+        [ -z "$db" ] && continue
+        case "$db" in
+            postgres) mkdir -p "${POSTGRES_DATA_DIR:-/app/database/postgres/$POSTGRES_CONTAINER_NAME}" 2>/dev/null || true ;;
+            mysql)    mkdir -p "${MYSQL_DATA_DIR:-/app/database/mysql/$MYSQL_CONTAINER_NAME}" 2>/dev/null || true ;;
+            mongodb)  mkdir -p "${MONGO_DATA_DIR:-/app/database/mongodb/$MONGO_CONTAINER_NAME}" 2>/dev/null || true ;;
+            redis)    mkdir -p "${REDIS_DATA_DIR:-/app/database/redis/$REDIS_CONTAINER_NAME}" 2>/dev/null || true ;;
+        esac
+    done < <(normalize_selected_dbs "$selected_dbs")
+}
+
+# Persist resolved *_DATA_DIR for selected databases if missing from env file and ensure host directories exist
+persist_selected_db_data_dirs() {
+    local env_file="$1"
+    local selected_dbs="${2:-all}"
+    local db var_name var_val
+
+    while IFS= read -r db; do
+        [ -z "$db" ] && continue
+        case "$db" in
+            postgres) var_name="POSTGRES_DATA_DIR"; var_val="${POSTGRES_DATA_DIR:-}" ;;
+            mysql)    var_name="MYSQL_DATA_DIR";    var_val="${MYSQL_DATA_DIR:-}" ;;
+            mongodb)  var_name="MONGO_DATA_DIR";    var_val="${MONGO_DATA_DIR:-}" ;;
+            redis)    var_name="REDIS_DATA_DIR";    var_val="${REDIS_DATA_DIR:-}" ;;
+            *)        continue ;;
+        esac
+        if [ -n "$var_val" ]; then
+            if [ -f "$env_file" ] && ! grep -q "^[[:space:]]*${var_name}=" "$env_file"; then
+                echo "${var_name}=${var_val}" >> "$env_file"
+            fi
+            mkdir -p "$var_val" 2>/dev/null || true
+        fi
+    done < <(normalize_selected_dbs "$selected_dbs")
 }
 
 # ==============================================================================

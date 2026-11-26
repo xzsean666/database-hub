@@ -542,11 +542,8 @@ execute_local() {
 
     ensure_mongodb_keyfile
 
-    # Ensure database host directories exist
-    mkdir -p "${POSTGRES_DATA_DIR:-/app/database/postgres/$POSTGRES_CONTAINER_NAME}" \
-             "${MYSQL_DATA_DIR:-/app/database/mysql/$MYSQL_CONTAINER_NAME}" \
-             "${MONGO_DATA_DIR:-/app/database/mongodb/$MONGO_CONTAINER_NAME}" \
-             "${REDIS_DATA_DIR:-/app/database/redis/$REDIS_CONTAINER_NAME}" 2>/dev/null || true
+    # Ensure database host directories exist for selected databases
+    ensure_selected_db_data_dirs "$SELECTED_DBS"
 
     local compose_base
     compose_base=$(build_compose_command "$ENV_FILE")
@@ -555,6 +552,7 @@ execute_local() {
 
     case "$ACTION" in
         up)
+            bash "$PROJECT_ROOT/scripts/preflight.sh" "$ENV_FILE" "$SELECTED_DBS"
             log_step "Starting containers ($SELECTED_DBS) for instance [${INSTANCE_ID:-database-hub}]..."
             # shellcheck disable=SC2086
             $compose_base up -d
@@ -723,14 +721,9 @@ execute_remote() {
     run_remote_cmd "mkdir -p '$REMOTE_DIR/$(dirname "$remote_env_rel")'"
     cat "$ENV_FILE" | run_remote_cmd "cat > '$REMOTE_DIR/$remote_env_rel'"
 
-    # Ensure resolved host database directories exist and env has explicit data paths
-    run_remote_cmd "
-        grep -q '^[[:space:]]*POSTGRES_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'POSTGRES_DATA_DIR=$POSTGRES_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
-        grep -q '^[[:space:]]*MYSQL_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'MYSQL_DATA_DIR=$MYSQL_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
-        grep -q '^[[:space:]]*MONGO_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'MONGO_DATA_DIR=$MONGO_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
-        grep -q '^[[:space:]]*REDIS_DATA_DIR=' '$REMOTE_DIR/$remote_env_rel' || echo 'REDIS_DATA_DIR=$REDIS_DATA_DIR' >> '$REMOTE_DIR/$remote_env_rel';
-        mkdir -p '$POSTGRES_DATA_DIR' '$MYSQL_DATA_DIR' '$MONGO_DATA_DIR' '$REDIS_DATA_DIR' 2>/dev/null || true
-    "
+    # Resolve host database directories on the remote server itself (not local workstation paths)
+    # and ensure only selected database directories are created/persisted.
+    run_remote_cmd "cd '$REMOTE_DIR' && bash -c 'source scripts/lib/common.sh && load_env_file \"\$1\" \"\$PWD\" && persist_selected_db_data_dirs \"\$ENV_FILE_LOADED\" \"\$2\"' _ '$remote_env_rel' '$SELECTED_DBS'"
 
     local compose_base
     compose_base=$(build_compose_command "$remote_env_rel")
@@ -738,6 +731,7 @@ execute_remote() {
     # 6. Execute Remote Action
     case "$ACTION" in
         up)
+            run_remote_cmd "cd '$REMOTE_DIR' && bash scripts/preflight.sh '$remote_env_rel' '$SELECTED_DBS'"
             log_step "Deploying containers on remote host ($SELECTED_DBS) [Instance: ${INSTANCE_ID:-database-hub}]..."
             run_remote_cmd "cd '$REMOTE_DIR' && $compose_base up -d"
             log_success "Remote deployment initiated. Waiting for healthcheck..."
@@ -807,7 +801,11 @@ main() {
         derive_replica_env "$MASTER_ENV" "$ENV_FILE" "$m_host" "$is_same" 10 "$MAX_RATE"
     fi
 
-    load_env_file "$ENV_FILE" "$PROJECT_ROOT" || true
+    if [ -n "$ENV_FILE" ]; then
+        load_env_file "$ENV_FILE" "$PROJECT_ROOT"
+    else
+        load_env_file "" "$PROJECT_ROOT" || true
+    fi
     ENV_FILE="${ENV_FILE_LOADED:-$ENV_FILE}"
 
     if [ "$TARGET" = "remote" ]; then

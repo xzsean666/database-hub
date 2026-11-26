@@ -40,7 +40,7 @@ services:
     ports:
       - "${BIND_IP:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - "${POSTGRES_DATA_DIR:-/app/database/postgres/${POSTGRES_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-postgres}}:/var/lib/postgresql/data"
+      - "${POSTGRES_DATA_DIR:-${DATA_DIR:-/app/database}/postgres/${POSTGRES_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-postgres}}:/var/lib/postgresql/data"
       - "./configs/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro"
       - "./configs/postgres/conf.d:/etc/postgresql/conf.d:ro"
       - "./configs/postgres/init:/docker-entrypoint-initdb.d:ro"
@@ -84,7 +84,7 @@ services:
     ports:
       - "${BIND_IP:-127.0.0.1}:${MYSQL_PORT:-3306}:3306"
     volumes:
-      - "${MYSQL_DATA_DIR:-/app/database/mysql/${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}}:/var/lib/mysql"
+      - "${MYSQL_DATA_DIR:-${DATA_DIR:-/app/database}/mysql/${MYSQL_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mysql}}:/var/lib/mysql"
       - "./configs/mysql/conf.d:/etc/mysql/conf.d:ro"
       - "./configs/mysql/init:/docker-entrypoint-initdb.d:ro"
     ulimits:
@@ -131,7 +131,7 @@ services:
     ports:
       - "${BIND_IP:-127.0.0.1}:${MONGO_PORT:-27017}:27017"
     volumes:
-      - "${MONGO_DATA_DIR:-/app/database/mongodb/${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}}:/data/db"
+      - "${MONGO_DATA_DIR:-${DATA_DIR:-/app/database}/mongodb/${MONGO_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-mongodb}}:/data/db"
       - "./configs/mongodb/mongod.conf:/etc/mongod.conf:ro"
       - "./configs/mongodb/keys:/etc/mongodb/keys:ro"
       - "./configs/mongodb/init:/docker-entrypoint-initdb.d:ro"
@@ -184,7 +184,7 @@ services:
     ports:
       - "${BIND_IP:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
-      - "${REDIS_DATA_DIR:-/app/database/redis/${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}}:/data"
+      - "${REDIS_DATA_DIR:-${DATA_DIR:-/app/database}/redis/${REDIS_CONTAINER_NAME:-${INSTANCE_ID:-database-hub}-redis}}:/data"
       - "./configs/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"
     sysctls:
       net.core.somaxconn: 1024
